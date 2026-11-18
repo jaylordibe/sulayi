@@ -1,23 +1,75 @@
 # Roadmap
 
-This is the dependency-ordered plan. It is written so that a reader can tell what is
-built, what is next, and what is explicitly refused — and so that "we shipped a
-foundation" cannot be mistaken for "we shipped a security product".
+Sulayi's plan to its first usable version, and what it deliberately leaves out. Each
+phase is designed as a plan with a threat model, approved, implemented, then validated —
+against local fixtures in CI and against the reference starters in the
+reference-applications workflow. A phase is done when its acceptance criteria hold, not
+when its unit tests pass.
 
-Ordering principle: **each milestone must make an existing honest limitation
-disappear.** A milestone that adds surface without removing a limitation is deferred.
+**The MVP:** Sulayi runs locally against an explicitly authorized web application or API,
+signs in as several test accounts, discovers its attack surface with or without a
+specification, performs controlled security tests, verifies real vulnerabilities, and
+produces reproducible reports.
 
-> **Repositioned 2026-09-07.** A [product validation gate](evaluation/product-validation-gate.md)
-> measured this project against two live reference applications, a real Nuclei binary and a
-> refreshed ecosystem review. The coverage ledger is now the product and native
-> authorization checking is a contributor to it, because the authorization differentiator
-> is contested by [Hadrian](https://github.com/praetorian-inc/hadrian) and coverage
-> accounting is not contested by anything. No code was removed; the claims and the build
-> order changed. See [ADR-0017](adr/0017-reposition-to-coverage-and-verification.md).
+## Phases
+
+| Phase | What it delivers | Status |
+|---|---|---|
+| **R** | Rename to Sulayi: module path, `sulayi attack`, `sulayi.yaml`, a self-ignoring `.sulayi/`; old names refused with a migration message ([ADR-0018](adr/0018-product-identity-sulayi.md)) | Done |
+| **S0** | Safety enforced in the HTTP client: `safe` / `standard` / `aggressive` profiles, request and duration budgets, a request log, interrupt handling with detached fixture restoration, origin-bound credentials; Nuclei and ZAP blocked until their traffic can be scoped ([ADR-0019](adr/0019-safety-enforced-at-the-http-client.md)) | Done |
+| **S1** | Signing in as test accounts: `--env` credentials files, login identities (bearer token or cookie session with CSRF), bounded re-authentication that never replays a request, roles ([ADR-0020](adr/0020-login-identities-and-credentials-files.md)) | Done — the NestJS starter's JWT login is validated against the real application; the Laravel starter's is pending re-validation after the `${NAME}` fix |
+| **S2** | Applications without an OpenAPI document: framework adapters alone, browser recordings (discovery only), a bounded same-origin GET crawler, and a declared access policy as the oracle ([ADR-0021](adr/0021-surface-without-a-specification.md)) | Done — spec-less validation against the Laravel starter is pending its first reference-workflow run |
+| **S3** | Authorization across roles and accounts: object identifiers harvested from each account's own responses, cross-role (function-level) comparison, records Sulayi creates and cleans up itself | Next |
+| **S4** | Injection and misconfiguration checks, each confirmed by a deterministic runtime oracle rather than a guess, with payload impact classes enforced by the HTTP client | Planned |
+| **S5** | `sulayi report` and `sulayi verify <finding-id>`: re-running a finding from its recipe, with fresh sessions, as a new run linked to the original | Planned |
+| **MVP measurement** | Run against Juice Shop, crAPI and both reference starters; measure false positives first, then confirmed detections, coverage, reproducibility (identical coverage across three runs), time, and requests outside scope (must be zero) | Planned |
+
+### Acceptance criteria for the phases still ahead
+
+- **S3** — On the reference starters, cross-account tests run with no hand-written
+  fixture; a cross-role finding is confirmed only by the existing verification; every
+  record Sulayi creates is removed, or reported as not removed.
+- **S4** — Each check detects its planted defect in an intentionally vulnerable
+  application and reports nothing on the secure counterpart; no payload is sent that the
+  effective profile does not permit.
+- **S5** — A fixed defect verifies as fixed, an unfixed one reproduces, and `verify` reads
+  nothing from the earlier run but the finding's recipe.
+- **MVP measurement** — Results are published as measured, including the false-positive
+  rate, before anything in "Later" is planned.
+
+## Later
+
+Deliberately unplanned until the MVP measurement shows the core is reliable on real
+applications: a headless browser for single-page applications; optional, provider-neutral
+AI assistance that proposes hypotheses for the deterministic engine to confirm or reject;
+CI integration and comparison between runs; a verified outbound-destination control that
+would let Nuclei and ZAP run again; a dashboard.
+
+## Not goals
+
+- A general-purpose vulnerability scanner or a template corpus. Sulayi's checks are few,
+  each confirmed by runtime evidence.
+- Testing anything not explicitly authorized. The URL given is the authorization, scope
+  is an allowlist, and every request is logged.
+- Any requirement for AI, a cloud service or an account.
+- Reporting a vulnerability as confirmed without reproducible evidence.
+
+## What would make this project not worth continuing
+
+If the MVP measurement shows a false-positive rate high enough that a developer would
+switch the checks off, the verification approach has failed and should be reported as
+such, not tuned until the number looks better.
 
 ---
 
-## Done — M0: Foundation
+## History: AppSec Framework milestones (superseded)
+
+What follows is the roadmap as it stood before the project became Sulayi, kept unchanged
+as a record of what was built, measured and decided. Its "Later" and "Explicit non-goals"
+sections are superseded by the plan above — in particular, crawling (S2) and injection
+testing (S4) are now in scope, under the constraints the ADRs record.
+
+### Done — M0: Foundation
 
 Delivered in this repository, with tests.
 
@@ -32,7 +84,7 @@ every operation it did not test.
 
 ---
 
-## Done — M1: Identities and an authenticated control request
+### Done — M1: Identities and an authenticated control request
 
 **Removed the limitation:** no finding could reach `confirmed`, because there was no
 authenticated baseline to compare an anonymous response against.
@@ -73,7 +125,7 @@ establishment, refresh rotation, custom multi-step authentication.
 
 ---
 
-## Done — M2: Two identities and one owned resource: BOLA
+### Done — M2: Two identities and one owned resource: BOLA
 
 **Removed the limitation:** the largest class of real API findings was invisible.
 
@@ -85,7 +137,7 @@ establishment, refresh rotation, custom multi-step authentication.
 | Mutation verification | A write is confirmed only by re-fetching as the owner and diffing. A `200` never confirms a mutation. | ✅ Read-write-read as the owner, field-level attribution, best-effort verified restoration. Cross-owner `DELETE` is deliberately out of scope ([ADR-0013](adr/0013-cross-owner-verification-semantics.md)). |
 | Path-parameter filling | Operations currently blocked as `missing_resource` become testable. | ✅ Both for cross-owner work and for the M1 declared-auth check, which previously reported every parameterised operation as untestable. |
 
-### The owner-control criterion was not sufficient, and has been corrected
+#### The owner-control criterion was not sufficient, and has been corrected
 
 The criterion above said owner `200` + other `404` is a **proven** denial. It is
 not, on its own. Three things produce that pair with no access control involved:
@@ -104,7 +156,7 @@ non-owner's response can be tied to *that resource* and not merely to a document
 of the same shape, and ownership expectation is declared per fixture rather than
 assumed, so a deliberately shared record is never reported.
 
-### API-created fixtures are deferred, and M2 is partial because of it
+#### API-created fixtures are deferred, and M2 is partial because of it
 
 The criterion allows resources to be "created through the application's own API".
 That is not implemented, and the milestone is marked partial rather than complete
@@ -129,7 +181,7 @@ permission or role matrices, no framework adapters.
 
 ---
 
-## Done (partial) — M3: Framework adapters
+### Done (partial) — M3: Framework adapters
 
 **Removes the limitation:** the oracle depended entirely on a specification, and
 a specification that marks everything protected — or nothing — carries no
@@ -143,7 +195,7 @@ information.
 | NestJS adapter | Reads the permission catalog and guard metadata via a TypeScript probe. | ⚠️ **Static tier only.** Controllers, the global guard, `@Public()` and authorization decorators are read from source. No module is imported — see below. |
 | Provenance merging | Adapter-derived expectations are `inferred` until corroborated at runtime; conflicts with the specification are reported, not silently resolved. | ✅ Agreement corroborates, disagreement withdraws the expectation from **both** sources and is reported. No extraction method reaches `observed` or `verified`. |
 
-### The execution strategy in the criteria is unsafe as written, and was changed
+#### The execution strategy in the criteria is unsafe as written, and was changed
 
 The Laravel and NestJS criteria above name `artisan` and a TypeScript probe.
 Implementing M3 established what those actually do, and neither can be the
@@ -165,7 +217,7 @@ execute-target-code`, and **M3 ships the static tier only**. Full reasoning in
 [ADR-0014](adr/0014-adapter-contract-and-extraction-trust.md), which refines
 ADR-0002's tier ordering rather than replacing it.
 
-### Why this milestone is partial
+#### Why this milestone is partial
 
 The trust gate for tier 1 is built and tested; no tier-1 adapter ships. Writing
 one means either a PHP or Node program whose own dependencies this project's
@@ -191,7 +243,7 @@ See threat model T-18.
 
 ---
 
-## Done — M4: External engines
+### Done — M4: External engines
 
 **Removes the limitation:** whole weakness classes were listed in
 `classesNotAssessed` with nothing able to address them, because this project
@@ -204,7 +256,7 @@ deliberately does not reinvent mature scanners.
 | Failure isolation | A crashed engine is a `blocked` row plus a recorded tool failure. It is never an absence of findings. | ✅ Missing, crashed, hung, flooding, malformed and profile-refused engines all produce a blocked row whose text says what was lost. A failed engine cannot remove a class from `classesNotAssessed`. |
 | Nuclei hardening | `-disable-unsigned-templates`, never `-code`, pinned and checksummed templates, local network access restricted, Interactsh self-hosted or disabled. | ✅ with the flags verified against Nuclei v3.11.x rather than assumed, and with a corpus that would execute nothing refused before the process starts — see below. |
 
-### The flags in the criteria were checked, not copied
+#### The flags in the criteria were checked, not copied
 
 `-disable-unsigned-templates` and `-code` exist as written. The rest needed
 verifying against the current CLI, and the distinction that matters turned out
@@ -234,7 +286,7 @@ deliberate opt-in for an operator's own templates. A waived signature check is
 recorded in the provenance of every observation and in the report's limitations,
 so a control that was turned off is never described as one that held.
 
-### Semgrep or opengrep: both, and why that was cheap
+#### Semgrep or opengrep: both, and why that was cheap
 
 opengrep is a fork of Semgrep's open-source engine: both LGPL-2.1, same
 `--config`, same `--json` document. Supporting the second cost a name in a list,
@@ -244,7 +296,7 @@ preferred when both are installed, on evidence: Semgrep's metrics default to
 registry rules are licensed for internal use only — which is why this repository
 already has a CI check forbidding references to them.
 
-### It was partial until M6, and what closing that found
+#### It was partial until M6, and what closing that found
 
 M4 shipped with an explicit gap: **no engine had ever been executed against a real
 binary**, because none was installed in the environment it was built in, and installing one
@@ -297,7 +349,7 @@ or referenced, no rule or template corpus is written, and nothing is installed.
 
 ---
 
-## Done — M5: Surface beyond the specification
+### Done — M5: Surface beyond the specification
 
 **Removes the limitation:** undocumented routes were invisible, so the ledger measured
 coverage of a surface handed to us by the thing being audited.
@@ -310,7 +362,7 @@ coverage of a surface handed to us by the thing being audited.
 | Well-known probes | A deliberately small, documented list; target origin only. | ✅ Five paths, each admitted only because a published standard says the document *enumerates other paths*. Every rejection is written down too. |
 | Ledger | Every path outside the specification becomes `untested (not in specification)`. | ✅ Dimension `path`, cause `not_in_specification`, counted in the headline untested figure. |
 
-### What was refined before implementation
+#### What was refined before implementation
 
 **`sitemap.xml` was considered and rejected.** It is the closest thing to a crawler input
 in the candidate set: a list of pages to crawl, whose contents are site pages rather than
@@ -341,7 +393,7 @@ from the application's routing table, the expectation from the same adapter, and
 unchanged. Nothing is invented, so this is the one narrow case where discovered surface is
 testable — behind `discovery.surface.assessAdapterDiscovered`.
 
-### The boundary this milestone was most likely to cross
+#### The boundary this milestone was most likely to cross
 
 Discovery is where this project would have become a crawler, and the check is mechanical
 rather than rhetorical: there is exactly one function in the package that makes a request,
@@ -354,7 +406,7 @@ crawling because there is nothing to configure.
 That also makes server-side request forgery a non-question rather than a control to audit:
 the set of URLs discovery will request is fixed before any target output is read.
 
-### What it does not do
+#### What it does not do
 
 Discovery finds some undocumented surface, never all of it. There is no denominator for
 "how much of the application was found", so no report offers one — inventing a completeness
@@ -369,7 +421,7 @@ JavaScript, and neither could be started without installing dependencies.
 
 ---
 
-## Done — M6: Evaluation hardening
+### Done — M6: Evaluation hardening
 
 **Removes the limitation:** the evaluation corpus is synthetic, and it hides real defects.
 
@@ -401,7 +453,7 @@ that were all wrong.
 | Terminal output | Every assurance-relevant fact asserted against the terminal as well as the JSON. | ✅ Rejected identities, unusable identities and failed components now appear in the summary, each with a test. The reference harness asserts the terminal counters agree with the ledger. |
 | Real engines | ZAP and the source analyser proven against real binaries as Nuclei is. | ✅ for all three integrations — Nuclei v3.11.1, ZAP 2.17.0, opengrep v1.29.0. **Semgrep itself was never executed**: the source-analysis integration accepts either binary and only opengrep has been run. See [docs/engines/README.md](engines/README.md#validation-status). |
 
-### What running the real engines found
+#### What running the real engines found
 
 M4 shipped ZAP and source-analysis integrations that had never been executed. Both were
 broken, in ways no fixture could have shown:
@@ -433,7 +485,7 @@ would produce more confident wrongness.
 
 ---
 
-## Later
+### Later
 
 Reordered by [ADR-0017](adr/0017-reposition-to-coverage-and-verification.md), which made
 the coverage ledger the product and demoted authorization to a contributor.
@@ -464,7 +516,7 @@ then confirm or reject.
 
 ---
 
-## Explicit non-goals
+### Explicit non-goals
 
 Not "later" — **not at all**, unless the reasoning in
 [the product thesis](research/product-thesis.md) changes:
@@ -480,7 +532,7 @@ Not "later" — **not at all**, unless the reasoning in
 
 ---
 
-## What would make this project not worth continuing
+### What would make this project not worth continuing
 
 Stated in advance, so it is harder to rationalise away later:
 
@@ -490,7 +542,7 @@ Stated in advance, so it is harder to rationalise away later:
   accounting, the differentiator is gone and contributing upstream becomes the better
   use of everyone's time.
 
-### Both were tested on 2026-09-07. Here is what happened.
+#### Both were tested on 2026-09-07. Here is what happened.
 
 Writing a stop condition is easy; the test is what you do when it fires.
 
@@ -523,7 +575,7 @@ Half a condition does not mean half a shutdown. It means the surviving half is t
 product, which is what
 [ADR-0017](adr/0017-reposition-to-coverage-and-verification.md) records.
 
-### The condition that replaces the first one
+#### The condition that replaces the first one
 
 Now that the ledger is the product, the honest stop condition changes with it:
 

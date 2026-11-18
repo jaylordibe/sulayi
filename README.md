@@ -388,7 +388,7 @@ state is protected only as far as you list them.
 | [Architecture decisions](docs/adr/) | every consequential decision and the alternatives rejected |
 | [External engines](docs/engines/README.md) | Nuclei, ZAP and source analysis: configuration and status |
 | [Writing an adapter](docs/adapters/contract.md) | the adapter contract, in any language |
-| [Roadmap](docs/roadmap.md) | milestones delivered so far |
+| [Roadmap](docs/roadmap.md) | the phases to the MVP, what is done and what is next |
 | [Changelog](CHANGELOG.md) | what changed |
 
 ## Contributing
