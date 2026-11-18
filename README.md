@@ -41,7 +41,7 @@ request it sends.
 
 ## Quick start
 
-**Requirements:** Go 1.27.1 or newer, and an application that serves an OpenAPI 3.x document
+**Requirements:** Go 1.27.4 or newer, and an application that serves an OpenAPI 3.x document
 (or a copy of one on disk).
 
 ```bash
