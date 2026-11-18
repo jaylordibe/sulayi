@@ -131,10 +131,13 @@ func LoadEnvFile(path string, referenced []string) (*EnvFile, error) {
 //
 // The grammar is deliberately small: comments, blank lines, an optional
 // "export " prefix, and values that are unquoted, single-quoted (literal) or
-// double-quoted (with \n, \", \\ escapes). There is no variable expansion and
-// no command substitution — a credentials file is data, and a loader that
-// evaluated it would execute whatever the file said. Errors carry line numbers,
-// never content.
+// double-quoted (with \n, \", \\ and \$ escapes). ${NAME} in an unquoted or
+// double-quoted value expands, as phpdotenv, python-dotenv and Compose all do,
+// to the shell's NAME or else a NAME defined earlier in the file — an
+// application's own .env commonly builds an address from its domain this way.
+// There is no command substitution and no other form of expansion: a
+// credentials file is data, and a loader that evaluated it would execute
+// whatever the file said. Errors carry line numbers and names, never values.
 func parseEnv(s string) (map[string]string, error) {
 	out := map[string]string{}
 	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
@@ -166,7 +169,11 @@ func parseEnv(s string) (map[string]string, error) {
 				return nil, fmt.Errorf("line %d has text after its closing quote", n)
 			}
 			i += consumed
-			out[key] = val
+			expanded, err := expand(val, out)
+			if err != nil {
+				return nil, fmt.Errorf("line %d: %v", n, err)
+			}
+			out[key] = expanded
 		case strings.HasPrefix(raw, `'`):
 			end := strings.IndexByte(raw[1:], '\'')
 			if end < 0 {
@@ -185,7 +192,11 @@ func parseEnv(s string) (map[string]string, error) {
 			if idx := strings.Index(raw, "\t#"); idx >= 0 {
 				raw = raw[:idx]
 			}
-			out[key] = strings.TrimSpace(raw)
+			expanded, err := expand(strings.TrimSpace(raw), out)
+			if err != nil {
+				return nil, fmt.Errorf("line %d: %v", n, err)
+			}
+			out[key] = expanded
 		}
 	}
 	return out, nil
@@ -211,6 +222,9 @@ func doubleQuoted(first string, more []string) (string, string, int, error) {
 					b.WriteByte('\t')
 				case '"', '\\':
 					b.WriteByte(s[j])
+				case '$':
+					// An escaped dollar is literal and is not expanded.
+					b.WriteByte(literalDollar)
 				default:
 					b.WriteByte('\\')
 					b.WriteByte(s[j])
@@ -228,6 +242,41 @@ func doubleQuoted(first string, more []string) (string, string, int, error) {
 		s = more[consumed]
 		consumed++
 	}
+}
+
+// literalDollar stands in for an escaped "$" until expansion has run.
+const literalDollar = 0x00
+
+// expand replaces ${NAME} with the shell's NAME or a NAME defined earlier in
+// the file. An undefined name is an error naming the variable, never a value.
+func expand(v string, defined map[string]string) (string, error) {
+	var b strings.Builder
+	for {
+		i := strings.Index(v, "${")
+		if i < 0 {
+			b.WriteString(v)
+			break
+		}
+		end := strings.IndexByte(v[i:], '}')
+		if end < 0 {
+			return "", errors.New("has an unterminated ${")
+		}
+		name := v[i+2 : i+end]
+		if !envPattern.MatchString(name) {
+			return "", errors.New("has a ${...} that is not a variable name")
+		}
+		val, ok := os.LookupEnv(name)
+		if !ok {
+			val, ok = defined[name]
+		}
+		if !ok {
+			return "", fmt.Errorf("refers to ${%s}, which is not defined above it or in the environment", name)
+		}
+		b.WriteString(v[:i])
+		b.WriteString(val)
+		v = v[i+end+1:]
+	}
+	return strings.ReplaceAll(b.String(), string(rune(literalDollar)), "$"), nil
 }
 
 func trailingOK(rest string) bool {

@@ -25,8 +25,12 @@ Four facts constrained the design:
 ## Decision
 
 **`--env <file>`** loads a credentials file explicitly — never `.env` or
-`.env.example` on its own — with a small parser that does no expansion or
-substitution. Only names `sulayi.yaml` references are kept; the rest are counted
+`.env.example` on its own — with a small parser that does no command
+substitution. `${NAME}` in an unquoted or double-quoted value expands to the
+shell's NAME or one defined earlier in the file, as phpdotenv, python-dotenv and
+Compose do; without it the Laravel starter's `SYSAD_EMAIL="sysad@${APP_DOMAIN}"`
+was sent literally and rejected. A name used only for expansion is still not
+readable as a credential. Only names `sulayi.yaml` references are kept; the rest are counted
 and ignored. Values stay in memory and never enter the process environment. A
 shell variable overrides the file. A file git tracks is refused; one no ignore
 rule covers, or that others can read, is warned about. No error prints a value.

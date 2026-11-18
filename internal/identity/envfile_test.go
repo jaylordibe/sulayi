@@ -242,3 +242,56 @@ func TestCredentialSourceResolvesThroughTheLookup(t *testing.T) {
 		t.Errorf("a missing name: err = %v, want one naming the variable", err)
 	}
 }
+
+// An application's own .env commonly builds a value from another, as the
+// Laravel starter does with SYSAD_EMAIL="sysad@${APP_DOMAIN}". The name used
+// only for expansion is still not something Sulayi can read.
+func TestExpansionResolvesFromEarlierNamesWithoutExposingThem(t *testing.T) {
+	p := writeEnv(t, t.TempDir(), strings.Join([]string{
+		`APP_DOMAIN="app.local"`,
+		`SYSAD_EMAIL="sysad@${APP_DOMAIN}"`,
+		`UNQUOTED=admin@${APP_DOMAIN}`,
+		`SINGLE='kept ${APP_DOMAIN}'`,
+		`ESCAPED="cost \$5 and \${APP_DOMAIN}"`,
+	}, "\n"))
+	ef, err := LoadEnvFile(p, []string{"SYSAD_EMAIL", "UNQUOTED", "SINGLE", "ESCAPED"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"SYSAD_EMAIL": "sysad@app.local",
+		"UNQUOTED":    "admin@app.local",
+		"SINGLE":      "kept ${APP_DOMAIN}",
+		"ESCAPED":     "cost $5 and ${APP_DOMAIN}",
+	} {
+		if got, _ := ef.Lookup(name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	if ef.Has("APP_DOMAIN") {
+		t.Error("a name used only for expansion became readable")
+	}
+}
+
+func TestExpansionPrefersTheShellAndRejectsUndefinedNames(t *testing.T) {
+	t.Setenv("SULAYI_TEST_DOMAIN_9b1", "from-shell.test")
+	got, err := parseEnv("SULAYI_TEST_DOMAIN_9b1=from-file.test\nE=\"a@${SULAYI_TEST_DOMAIN_9b1}\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["E"] != "a@from-shell.test" {
+		t.Errorf("E = %q; the shell's value must win, as it does for lookups", got["E"])
+	}
+
+	_, err = parseEnv("PW=\"s3cr3t-${NOT_DEFINED_ANYWHERE}\"\n")
+	if err == nil || !strings.Contains(err.Error(), "NOT_DEFINED_ANYWHERE") || !strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("err = %v, want one naming the line and the variable", err)
+	}
+	if strings.Contains(err.Error(), "s3cr3t") {
+		t.Errorf("the error repeats the value: %q", err)
+	}
+	// A later definition does not reach back.
+	if _, err := parseEnv("A=\"${B}\"\nB=x\n"); err == nil {
+		t.Error("a name defined after its use was expanded")
+	}
+}
