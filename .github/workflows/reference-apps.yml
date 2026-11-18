@@ -39,32 +39,22 @@ jobs:
           go-version-file: go.mod
 
       - name: check out the reference application
-        run: git clone --depth 1 https://github.com/jaylordibe/laravel-api.git "$RUNNER_TEMP/laravel-api"
+        run: git clone --depth 1 https://github.com/jaylordibe/laravel-api-starter.git "$RUNNER_TEMP/laravel-api"
 
       - name: boot it
         working-directory: ${{ runner.temp }}/laravel-api
-        # Its own documented one-command path. Nothing here is Sulayi-specific:
-        # if this breaks, the application's own setup broke.
+        # Mirrors the starter's own README Quick start, which owns its setup. If
+        # that changes, this step should change with it. start.sh runs
+        # `docker exec -it`, which needs a terminal, so it runs under script(1)
+        # to be given one; nothing else is adapted.
         run: |
-          cp .env.example .env
-          docker compose up -d
-          # pg_isready ships inside the postgres image, so nothing is installed here.
+          script -q -e -c "./start.sh fresh" /dev/null
           for i in $(seq 1 60); do
-            docker exec laravel-db pg_isready -U laravel -d laravel_local >/dev/null 2>&1 && break
+            curl -fsS -o /dev/null http://127.0.0.1:8000/api/health/ready && break
             sleep 2
           done
-          docker exec laravel-api bash -c '
-            cd /var/www/html &&
-            composer install --no-interaction --no-progress -q &&
-            php artisan key:generate --no-interaction &&
-            php artisan migrate:fresh --seed --no-interaction &&
-            php artisan passport:keys --force --no-interaction &&
-            php artisan passport:client --personal --name=ci --provider=users --no-interaction &&
-            chmod -R 775 storage bootstrap/cache'
-          for i in $(seq 1 60); do
-            curl -fsS -o /dev/null http://127.0.0.1:8000/docs/api.json && break
-            sleep 2
-          done
+          curl -fsS -o /dev/null http://127.0.0.1:8000/docs/api.json || {
+            echo "::error::the application did not start"; exit 1; }
 
       - name: assess it
         env:
