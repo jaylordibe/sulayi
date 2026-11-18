@@ -58,7 +58,9 @@ type Document struct {
 	Findings []Finding       `json:"findings"`
 	Coverage []CoverageEntry `json:"coverage"`
 
-	ToolFailures       []string `json:"toolFailures"`
+	ToolFailures []string `json:"toolFailures"`
+	// CleanupIncomplete names fixtures that may still be modified.
+	CleanupIncomplete  []string `json:"cleanupIncomplete"`
 	OutOfScopeHosts    []string `json:"outOfScopeHosts"`
 	ClassesNotAssessed []string `json:"classesNotAssessed"`
 }
@@ -80,6 +82,12 @@ type Run struct {
 	Scope                  []string    `json:"scope"`
 	AllowsPrivateAddresses bool        `json:"allowsPrivateAddresses"`
 	Environment            Environment `json:"environment"`
+	// StoppedEarly says why the assessment ended before finishing its plan.
+	StoppedEarly string `json:"stoppedEarly,omitempty"`
+	// Requests is what the assessment sent to the target, against its limit.
+	Requests        int `json:"requests"`
+	RequestLimit    int `json:"requestLimit"`
+	CleanupRequests int `json:"cleanupRequests"`
 }
 
 // Environment records stated deviations from production, as facts rather than a
@@ -413,6 +421,10 @@ func Build(res engine.Result, version string) Document {
 			FinishedAt:             res.FinishedAt,
 			Scope:                  nonNil(res.ScopeEntries),
 			AllowsPrivateAddresses: res.AllowPrivate,
+			StoppedEarly:           res.StoppedEarly,
+			Requests:               res.Requests,
+			RequestLimit:           res.RequestLimit,
+			CleanupRequests:        res.CleanupRequests,
 			Environment: Environment{
 				Name:        res.Environment.Name,
 				Differences: res.Environment.Differences,
@@ -444,6 +456,7 @@ func Build(res engine.Result, version string) Document {
 		Identities:         make([]Identity, 0, len(res.Identities)),
 		Coverage:           make([]CoverageEntry, 0, len(res.Coverage)),
 		ToolFailures:       nonNil(res.ToolFailures),
+		CleanupIncomplete:  nonNil(res.CleanupIncomplete),
 		OutOfScopeHosts:    nonNil(res.OutOfScopeHosts),
 		ClassesNotAssessed: nonNil(res.ClassesNotAssessed),
 	}
@@ -877,6 +890,34 @@ func Summary(doc Document) string {
 	b.WriteString("  untested: " + strconv.Itoa(doc.Assurance.UntestedSurface) + "\n")
 	b.WriteString("  findings: " + strconv.Itoa(doc.Assurance.ConfirmedFindings) + " confirmed, " +
 		strconv.Itoa(doc.Assurance.SuspectedFindings) + " suspected\n")
+	if doc.Run.RequestLimit > 0 {
+		b.WriteString("  requests: " + strconv.Itoa(doc.Run.Requests) + " of " +
+			strconv.Itoa(doc.Run.RequestLimit))
+		if doc.Run.CleanupRequests > 0 {
+			b.WriteString(" (+" + strconv.Itoa(doc.Run.CleanupRequests) + " restoring fixtures)")
+		}
+		b.WriteString("\n")
+	}
+	if doc.Run.StoppedEarly != "" {
+		b.WriteString("\n")
+		b.WriteString(wrap("STOPPED EARLY: "+doc.Run.StoppedEarly+". Work that was not reached is in "+
+			"the ledger as blocked, with the reason; this is not a complete assessment.", 76, "  "))
+	}
+
+	// Incomplete cleanup comes first after the counts. It is the one thing in
+	// this summary that is about the target's data rather than about coverage:
+	// a fixture the assessment changed and could not put back, or could not
+	// show it had put back.
+	if n := len(doc.CleanupIncomplete); n > 0 {
+		b.WriteString("\n  CLEANUP INCOMPLETE: " + strconv.Itoa(n) + " fixture(s) may still be modified:\n")
+		for _, f := range doc.CleanupIncomplete {
+			wrapped := wrap(f, 74, "      ")
+			b.WriteString("    - " + strings.TrimLeft(wrapped, " "))
+		}
+		b.WriteString(wrap("Check each of these and restore it by hand. Restoration is attempted "+
+			"after every cross-owner write, including after a cancelled run, but it is not "+
+			"guaranteed.", 76, "  "))
+	}
 
 	// Ownership is stated in the terminal, not only in the JSON.
 	//
@@ -922,7 +963,12 @@ func Summary(doc Document) string {
 		if n == 1 {
 			noun = "component"
 		}
-		b.WriteString("  " + strconv.Itoa(n) + " " + noun + " failed during this run:\n")
+		// "did not complete" rather than "failed": an engine Sulayi blocks
+		// because it would bypass scope enforcement did not fail, and calling it
+		// a failure would invite somebody to "fix" it by weakening the control.
+		// Either way the work was not done, which is what the heading says.
+		b.WriteString("  COVERAGE REDUCED: " + strconv.Itoa(n) + " " + noun +
+			" did not run or did not complete:\n")
 		for _, f := range doc.ToolFailures {
 			// wrap() repeats its indent on every line, so the bullet is written
 			// once and the continuation is indented to line up under it.

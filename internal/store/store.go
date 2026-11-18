@@ -41,10 +41,11 @@ const FormatVersion = "sulayi.run/v1alpha1"
 
 // Run is one assessment's directory.
 type Run struct {
-	id   string
-	dir  string
-	mu   sync.Mutex
-	seen map[string]struct{}
+	id    string
+	dir   string
+	mu    sync.Mutex
+	logMu sync.Mutex
+	seen  map[string]struct{}
 }
 
 // Meta is the run directory's manifest.

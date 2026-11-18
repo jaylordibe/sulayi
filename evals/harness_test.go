@@ -81,7 +81,7 @@ func runAgainst(t *testing.T, handler http.Handler) (engine.Result, string) {
 	res, err := engine.Run(context.Background(), engine.Options{
 		RunID:   "eval",
 		Target:  srv.URL,
-		Profile: model.ProfileVerification,
+		Profile: model.ProfileStandard,
 		Surface: engine.Surface{
 			SpecDerived: true, Operations: parsed.Operations, Fidelity: parsed.Fidelity,
 		},
@@ -347,7 +347,7 @@ func TestExcludedOperationIsNeverRequested(t *testing.T) {
 	}
 
 	res, err := engine.Run(context.Background(), engine.Options{
-		RunID: "eval", Target: srv.URL, Profile: model.ProfileVerification,
+		RunID: "eval", Target: srv.URL, Profile: model.ProfileStandard,
 		Surface: engine.Surface{
 			SpecDerived: true, Operations: parsed.Operations, Fidelity: parsed.Fidelity,
 		},

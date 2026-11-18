@@ -39,6 +39,17 @@ type Check interface {
 	Run(context.Context, model.Operation) check.Result
 }
 
+// MutationGuard is the part of the HTTP client's safety guard the planner uses.
+//
+// It is declared here, where it is consumed, so the engine does not depend on
+// the HTTP client. The guard enforces; the planner only registers the exact
+// requests it intends to send and then closes registration.
+type MutationGuard interface {
+	Profile() model.Profile
+	Grant(method, rawURL string, fields []string) error
+	Seal()
+}
+
 // Surface describes the attack surface and, critically, how much of it we can
 // see.
 //
@@ -117,6 +128,14 @@ type Options struct {
 	AllowPrivate bool
 	// ExcludeOperations lists operation ids that must never be exercised.
 	ExcludeOperations []string
+	// StateChangingOperations names operations that change state whatever
+	// their method. They are planned as state-changing requests.
+	StateChangingOperations []string
+	// Guard is the HTTP client's safety guard. The planner registers the exact
+	// fixture requests the standard profile may send, then seals it before
+	// anything executes. Nil means nothing is registered, which leaves the
+	// client refusing every state-changing request below aggressive.
+	Guard MutationGuard
 	// ExcludeAuthEndpoints skips operations that look like authentication
 	// routes, so that a sweep cannot trip account lockout.
 	ExcludeAuthEndpoints bool
@@ -163,6 +182,20 @@ type Result struct {
 	// ToolFailures records engines or components that failed. A failure is never
 	// an absence of findings.
 	ToolFailures []string
+	// CleanupIncomplete names fixtures the assessment changed, or may have
+	// changed, and could not restore or could not verify as restored. It is
+	// separate from ToolFailures because it is not about coverage: somebody's
+	// data may still be wrong.
+	CleanupIncomplete []string
+	// StoppedEarly says why the assessment ended before finishing its plan:
+	// interrupted, out of time, or out of requests. Empty means it was not.
+	StoppedEarly string
+	// Requests and RequestLimit record what the assessment sent to the target
+	// against its budget, and CleanupRequests what it spent restoring fixtures
+	// above it.
+	Requests        int
+	RequestLimit    int
+	CleanupRequests int
 	// OutOfScopeHosts were discovered and deliberately not contacted.
 	OutOfScopeHosts []string
 	// ClassesNotAssessed names weakness classes no check covered. Without this,
@@ -278,6 +311,10 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if !opts.Profile.Valid() {
 		return Result{}, fmt.Errorf("engine: invalid profile %q", opts.Profile)
 	}
+	if opts.Guard != nil && opts.Guard.Profile() != opts.Profile {
+		return Result{}, fmt.Errorf("engine: the HTTP client enforces the %s profile but the plan is for %s",
+			opts.Guard.Profile(), opts.Profile)
+	}
 
 	res := Result{
 		RunID:        opts.RunID,
@@ -362,13 +399,21 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			}
 
 			required := ck.RequiredProfile(op)
+			configuredStateChanging := model.IsSafeMethod(op.Method) && op.IsStateChanging(opts.StateChangingOperations)
+			if configuredStateChanging {
+				required = model.ProfileAggressive
+			}
 			if allowed, cause := model.GateProfile(opts.Profile, required); !allowed {
 				base.Disposition = model.DispositionBlocked
 				base.Cause = cause
+				what := fmt.Sprintf("this operation uses %s", op.Method)
+				if configuredStateChanging {
+					what = "this operation is configured in assessment.stateChangingOperations"
+				}
 				base.Detail = fmt.Sprintf(
-					"this operation uses %s, which requires the %s profile; the effective profile is %s. "+
+					"%s, which requires the %s profile; the effective profile is %s. "+
 						"Sending it could change or destroy data, so it was not attempted",
-					op.Method, required, opts.Profile)
+					what, required, opts.Profile)
 				lg.add(base)
 				continue
 			}
@@ -381,6 +426,12 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	// is where growth is bounded; everything not planned gets a ledger row.
 	ownership := planOwnership(opts, lg)
 
+	// Registration closes before anything executes, so nothing running during
+	// the assessment can widen what the standard profile may change.
+	if opts.Guard != nil {
+		opts.Guard.Seal()
+	}
+
 	// Execution.
 	controls := &controlLog{}
 	locks := newFixtureLocks()
@@ -388,6 +439,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	var wg sync.WaitGroup
 	var failuresMu sync.Mutex
 	failures := map[string]struct{}{}
+	cleanup := map[string]struct{}{}
 
 	for i, j := range jobs {
 		if ctx.Err() != nil {
@@ -517,7 +569,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 
 			if out.ToolFailure != "" {
 				failuresMu.Lock()
-				failures[meta.ID+": "+out.ToolFailure] = struct{}{}
+				cleanup[meta.ID+": "+out.ToolFailure] = struct{}{}
 				failuresMu.Unlock()
 			}
 			if out.Disposition == model.DispositionBlocked && out.Cause == model.CauseTransportError {
@@ -581,6 +633,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	for f := range failures {
 		res.ToolFailures = append(res.ToolFailures, f)
 	}
+	for f := range cleanup {
+		res.CleanupIncomplete = append(res.CleanupIncomplete, f)
+	}
 	res.ClassesNotAssessed = removeEngineCovered(
 		qualifyOwnershipClasses(classesNotAssessed(opts.Checks), res.Ownership),
 		opts.Engines)
@@ -625,6 +680,7 @@ func sortResult(r *Result) {
 		return r.Coverage[i].Key() < r.Coverage[j].Key()
 	})
 	sort.Strings(r.ToolFailures)
+	sort.Strings(r.CleanupIncomplete)
 	sort.Strings(r.OutOfScopeHosts)
 	sort.Strings(r.ClassesNotAssessed)
 }

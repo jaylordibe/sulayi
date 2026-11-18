@@ -85,7 +85,7 @@ func referenceRun(t *testing.T) (engine.Result, report.Document) {
 	}
 
 	res, err := engine.Run(context.Background(), engine.Options{
-		RunID: "reference", Target: target, Profile: model.ProfileVerification,
+		RunID: "reference", Target: target, Profile: model.ProfileStandard,
 		Surface: engine.Surface{
 			SpecDerived: true, SpecSource: parsed.Operations[0].Sources[0],
 			Operations: parsed.Operations, Fidelity: parsed.Fidelity,

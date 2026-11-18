@@ -16,14 +16,48 @@ consumer can detect a change rather than misparse.
   `apiVersion: sulayi/v1alpha1`, the run directory is `.sulayi/`, and the report, run,
   evidence and adapter schema identifiers use the `sulayi` namespace. An `appsec.yaml` or
   `apiVersion: appsec/v1alpha1` is refused with a migration message rather than ignored.
-- **ZAP is gated at the `intrusive` profile in every mode.** Passive mode relied on
+- **ZAP is gated at the `aggressive` profile in every mode.** Passive mode relied on
   `-quickprogress`, which ZAP documents only as a progress display, so its passivity is
-  unproven and it no longer runs at the default profile.
+  unproven.
+- **Profiles are `safe`, `standard` (default) and `aggressive`**
+  ([ADR-0019](docs/adr/0019-safety-enforced-at-the-http-client.md)). `discovery`,
+  `verification`, `intrusive` and `authorizeIntrusive` are refused with a migration
+  message. `aggressive` requires `target.disposable: true`, a typed confirmation of the
+  target origin (`--yes` with no terminal) and exact-origin scope entries.
+- **Nuclei and ZAP are blocked in every profile**: they open network connections Sulayi's
+  scope enforcement cannot constrain. Enabling them records a blocked row and a
+  COVERAGE REDUCED notice; neither is started, and `doctor` does not execute them.
+- The terminal heading for incomplete components is now "COVERAGE REDUCED … did not run
+  or did not complete", because a blocked engine did not fail.
+- A cross-owner write's cleanup failure is reported as `cleanupIncomplete`, separately
+  from `toolFailures`.
+- Interrupted, timed-out and budget-exhausted runs exit 4 (aborted).
 
 ### Added
 
 - The runs directory writes its own `.gitignore`, so evidence is not committed from a
   repository whose ignore rules predate the rename.
+- **State-changing requests are decided in `httpx.Do`.** Under `standard`, only exact
+  requests registered for fixtures declared `disposable` (`resources[].disposable`) are
+  sent, changing only their configured fields, never `DELETE`. `assessment.stateChangingOperations`
+  marks read-only-method operations that change state.
+- **Interrupt handling.** SIGINT/SIGTERM cancel the run and kill child process groups;
+  restoration after a cross-owner write runs on a detached, 30-second-bounded context.
+- **Limits.** `assessment.maxRequests` (default 1,000) and `assessment.maxDurationMinutes`
+  (default 30), with a finite restoration allowance; reported in the summary and in
+  `run.requests`, `run.requestLimit`, `run.cleanupRequests` and `run.stoppedEarly`.
+- **Request log.** `requests.jsonl`: one redacted line per request, refused ones included.
+- An identity's credential is sent only to its target's origin.
+
+### Fixed
+
+- A scope `pathPrefix` could be escaped with dot segments, encoded dot segments or a
+  sibling prefix (`/apiv2` under `/api`).
+- `Set-Cookie` attributes were learned as secrets, redacting the target's hostname from
+  later evidence.
+- Restoration after a cross-owner write used the assessment's context, so cancelling the
+  run could leave a fixture modified with nothing reported.
+- Budget, safety and cancellation errors were reported as `transport_error`.
 
 ## [0.1.0] — unreleased
 

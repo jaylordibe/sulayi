@@ -22,8 +22,14 @@ func TestMinimalConfigLoadsWithDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if cfg.Assessment.Profile != "verification" {
-		t.Errorf("default profile = %q, want verification", cfg.Assessment.Profile)
+	if cfg.Assessment.Profile != "standard" {
+		t.Errorf("default profile = %q, want standard", cfg.Assessment.Profile)
+	}
+	if cfg.Assessment.MaxRequests != DefaultMaxRequests || DefaultMaxRequests != 1000 {
+		t.Errorf("default maxRequests = %d, want 1000", cfg.Assessment.MaxRequests)
+	}
+	if cfg.Assessment.MaxDurationMinutes != DefaultMaxDurationMinutes || DefaultMaxDurationMinutes != 30 {
+		t.Errorf("default maxDurationMinutes = %d, want 30", cfg.Assessment.MaxDurationMinutes)
 	}
 	if !cfg.ShouldExcludeAuthEndpoints() {
 		t.Error("authentication endpoints must be excluded by default")
@@ -46,28 +52,61 @@ func TestUnknownFieldsAreRejected(t *testing.T) {
 
 // The intrusive profile can change or destroy data, so selecting it is not by
 // itself authorization to use it.
-func TestIntrusiveProfileRequiresExplicitAuthorization(t *testing.T) {
-	_, err := parse(t, minimal+"\nassessment:\n  profile: intrusive\n")
+func TestAggressiveProfileRequiresDisposableTarget(t *testing.T) {
+	_, err := parse(t, minimal+"\nassessment:\n  profile: aggressive\n")
 	if err == nil {
-		t.Fatal("intrusive profile accepted without authorization")
+		t.Fatal("aggressive profile accepted against a target not declared disposable")
 	}
-	if !strings.Contains(err.Error(), "authorizeIntrusive") {
+	if !strings.Contains(err.Error(), "target.disposable") {
 		t.Errorf("error does not explain what is required: %v", err)
 	}
 
-	cfg, err := parse(t, minimal+"\nassessment:\n  profile: intrusive\n  authorizeIntrusive: true\n")
+	cfg, err := parse(t, "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: http://localhost:3000\n"+
+		"  disposable: true\nassessment:\n  profile: aggressive\n")
 	if err != nil {
-		t.Fatalf("authorized intrusive profile rejected: %v", err)
+		t.Fatalf("aggressive profile against a disposable target rejected: %v", err)
 	}
-	if cfg.Profile() != "intrusive" {
+	if cfg.Profile() != "aggressive" {
 		t.Errorf("profile = %q", cfg.Profile())
 	}
 }
 
 func TestInvalidProfileIsRejected(t *testing.T) {
-	_, err := parse(t, minimal+"\nassessment:\n  profile: aggressive\n")
-	if err == nil || !strings.Contains(err.Error(), "discovery, verification, intrusive") {
+	_, err := parse(t, minimal+"\nassessment:\n  profile: reckless\n")
+	if err == nil || !strings.Contains(err.Error(), "safe, standard, aggressive") {
 		t.Fatalf("error = %v, want the valid profiles listed", err)
+	}
+}
+
+// A pre-Sulayi profile name is refused, never translated: the profiles permit
+// different things, so mapping one silently would change what a run may do.
+func TestLegacyProfileNamesAreRefused(t *testing.T) {
+	for legacy, closest := range map[string]string{
+		"discovery": "safe", "verification": "safe", "intrusive": "aggressive",
+	} {
+		_, err := parse(t, minimal+"\nassessment:\n  profile: "+legacy+"\n")
+		if err == nil || !strings.Contains(err.Error(), "pre-Sulayi") || !strings.Contains(err.Error(), closest) {
+			t.Errorf("profile %q: error = %v, want a migration message naming %q", legacy, err, closest)
+		}
+	}
+}
+
+func TestLegacyAuthorizeIntrusiveIsRefused(t *testing.T) {
+	for _, v := range []string{"true", "false"} {
+		_, err := parse(t, minimal+"\nassessment:\n  authorizeIntrusive: "+v+"\n")
+		if err == nil || !strings.Contains(err.Error(), "target.disposable") {
+			t.Errorf("authorizeIntrusive: %s: error = %v, want a migration message", v, err)
+		}
+	}
+}
+
+func TestBudgetBoundsAreEnforced(t *testing.T) {
+	for _, body := range []string{
+		"maxRequests: 0", "maxRequests: 100001", "maxDurationMinutes: 0", "maxDurationMinutes: 1441",
+	} {
+		if _, err := parse(t, minimal+"\nassessment:\n  "+body+"\n"); err == nil {
+			t.Errorf("%s was accepted", body)
+		}
 	}
 }
 
@@ -510,5 +549,18 @@ func TestConfiguredFixturesRecordTheirProvenance(t *testing.T) {
 	}
 	if fx[0].Provenance != "configured" {
 		t.Errorf("provenance = %q, want configured", fx[0].Provenance)
+	}
+}
+
+// A malformed state-changing operation is a configuration error, caught before
+// anything runs, not a run that silently treats the operation as read-only.
+func TestStateChangingOperationsMustNameAMethodAndPath(t *testing.T) {
+	for _, bad := range []string{`"logout"`, `"GET logout"`, `"/logout"`, `""`} {
+		if _, err := parse(t, minimal+"\nassessment:\n  stateChangingOperations: ["+bad+"]\n"); err == nil {
+			t.Errorf("stateChangingOperations [%s] was accepted", bad)
+		}
+	}
+	if _, err := parse(t, minimal+"\nassessment:\n  stateChangingOperations: [\"GET /logout\", \"get /orders/{id}/cancel\"]\n"); err != nil {
+		t.Errorf("valid state-changing operations rejected: %v", err)
 	}
 }

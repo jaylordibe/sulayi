@@ -156,7 +156,7 @@ func TestInvocationIsHardened(t *testing.T) {
 	dir := signedCorpus(t)
 	w := scanner.Workspace{Dir: t.TempDir(), OutputPath: filepath.Join(t.TempDir(), "r.json")}
 	inv, err := Engine{}.Invocation(
-		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true, RuleSource: dir},
 		w, scanner.Availability{Present: true, Path: "/usr/local/bin/nuclei", Version: "v3.11.1"})
 	if err != nil {
@@ -206,7 +206,7 @@ func TestInvocationIsHardened(t *testing.T) {
 // scan unreproducible and the corpus an unrecorded dependency, so it is refused.
 func TestInvocationRefusesToRunWithoutAnExplicitCorpus(t *testing.T) {
 	_, err := Engine{}.Invocation(
-		scanner.Target{BaseURL: "http://x/", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://x/", Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true},
 		scanner.Workspace{}, scanner.Availability{Present: true, Path: "/bin/nuclei"})
 	if err == nil {
@@ -248,10 +248,10 @@ func TestTemplateProvenanceRecordsAPinWhenThereIsOne(t *testing.T) {
 	}
 }
 
-// Nuclei sends real probe traffic, so it is not reconnaissance.
-func TestRequiredProfileIsVerification(t *testing.T) {
-	if got := (Engine{}).RequiredProfile(scanner.Settings{}); got != model.ProfileVerification {
-		t.Errorf("required profile = %s, want verification", got)
+// Nuclei sends real probe traffic, so it does not qualify as safe.
+func TestRequiredProfileIsStandard(t *testing.T) {
+	if got := (Engine{}).RequiredProfile(scanner.Settings{}); got != model.ProfileStandard {
+		t.Errorf("required profile = %s, want standard", got)
 	}
 }
 
@@ -317,7 +317,7 @@ func TestAnEntirelyUnsignedCorpusIsRefusedRatherThanSilentlySkipped(t *testing.T
 	}
 
 	_, err := Engine{}.Invocation(
-		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true, RuleSource: dir},
 		scanner.Workspace{}, scanner.Availability{Present: true, Path: "/usr/local/bin/nuclei"})
 	if err == nil {
@@ -342,7 +342,7 @@ func TestUnsignedTemplatesRunOnlyWhenExplicitlyTrusted(t *testing.T) {
 	}
 
 	inv, err := Engine{}.Invocation(
-		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true, RuleSource: dir,
 			Extra: map[string]string{"allowUnsignedTemplates": "true"}},
 		scanner.Workspace{}, scanner.Availability{Present: true, Path: "/usr/local/bin/nuclei"})
@@ -369,7 +369,7 @@ func TestAPartlySignedCorpusRecordsWhatWillNotRun(t *testing.T) {
 	}
 
 	inv, err := Engine{}.Invocation(
-		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true, RuleSource: dir},
 		scanner.Workspace{}, scanner.Availability{Present: true, Path: "/usr/local/bin/nuclei"})
 	if err != nil {
@@ -384,7 +384,7 @@ func TestAPartlySignedCorpusRecordsWhatWillNotRun(t *testing.T) {
 // An empty directory is a scan that looks for nothing.
 func TestAnEmptyCorpusIsRefused(t *testing.T) {
 	_, err := Engine{}.Invocation(
-		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true, RuleSource: t.TempDir()},
 		scanner.Workspace{}, scanner.Availability{Present: true, Path: "/usr/local/bin/nuclei"})
 	if err == nil {

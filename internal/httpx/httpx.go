@@ -36,6 +36,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jaylordibe/sulayi/internal/model"
@@ -92,6 +93,21 @@ type Options struct {
 	// subsequent response then classifies as a denial, which reads as a clean
 	// report.
 	RequestsPerSecond float64
+	// MaxRequests bounds every request this client sends. Zero means
+	// unlimited, which only tests use.
+	MaxRequests int
+	// CleanupAllowance is how many further requests may be sent, once the
+	// budget is spent, by work marked with Cleanup.
+	CleanupAllowance int
+	// Audit receives one record for every Do call, after its outcome is known,
+	// including requests that were refused and never sent. If it ever returns
+	// an error, every later request is refused: a request log with silent gaps
+	// is worse than a run that stops. Nil disables the log, which only tests do.
+	Audit func(AuditRecord) error
+	// Guard decides whether a state-changing request may be sent. Nil behaves
+	// as the safe profile with no grants: every state-changing request is
+	// refused, so a client built without one fails closed.
+	Guard *Guard
 }
 
 // Client performs scope-enforced HTTP requests and captures redacted evidence.
@@ -104,6 +120,28 @@ type Client struct {
 	hc       *http.Client
 	now      func() time.Time
 	limiter  *limiter
+	budget   *budget
+
+	auditSeq    atomic.Int64
+	auditBroken atomic.Bool
+}
+
+// AuditRecord is what the request log learns about one Do call. Every string in
+// it is already redacted.
+type AuditRecord struct {
+	Seq      int64
+	Time     time.Time
+	Method   string
+	URL      string
+	Identity string
+	Cleanup  bool
+	// Outcome is "sent", "refused" (by the safety guard, scope or the budget),
+	// "not_sent" (cancelled before it left) or "error" (it may have reached the
+	// target and no response came back).
+	Outcome string
+	Reason  string
+	Status  int
+	Elapsed time.Duration
 }
 
 // Defaults applied when Options leaves a field zero.
@@ -146,6 +184,7 @@ func New(opts Options) (*Client, error) {
 		red:     opts.Redactor,
 		now:     opts.Now,
 		limiter: newLimiter(opts.RequestsPerSecond),
+		budget:  newBudget(opts.MaxRequests, opts.CleanupAllowance),
 	}
 	c.resolver = opts.Resolver
 	if c.resolver == nil {
@@ -351,6 +390,13 @@ type Request struct {
 	URL    string
 	Header map[string][]string
 	Body   []byte
+	// Identity names who the request is sent as, for the request log only. It
+	// grants nothing. Empty means anonymous.
+	Identity string
+	// BoundOrigin, when set, is the only origin this request may go to. An
+	// identity sets it to its target's origin, so its credential is never sent
+	// to another host, even one that is in scope.
+	BoundOrigin string
 }
 
 // Do performs a request and returns a redacted exchange.
@@ -358,7 +404,68 @@ type Request struct {
 // A transport failure is returned inside the exchange, not only as an error, so
 // that a caller can record what was attempted. The error is also returned so a
 // caller cannot mistake a failure for a response.
+//
+// Every call is recorded in the request log exactly once, whatever happened.
 func (c *Client) Do(ctx context.Context, r Request) (model.Exchange, error) {
+	if c.opts.Audit != nil && c.auditBroken.Load() {
+		err := &ErrNotSent{Err: errors.New("the request log could not be written, so no further " +
+			"request is sent")}
+		return model.Exchange{
+			Request: model.CapturedRequest{Method: strings.ToUpper(r.Method), URL: c.red.URL(r.URL)},
+			Err:     err.Error(),
+		}, err
+	}
+	at := c.now()
+	ex, err := c.do(ctx, r)
+	c.audit(ctx, r, at, ex, err)
+	return ex, err
+}
+
+// audit records one call. Classifying the outcome by error type rather than
+// by message keeps "refused, nothing sent" distinct from "sent, and the
+// response was lost", which is the difference an operator reconstructing a run
+// needs most.
+func (c *Client) audit(ctx context.Context, r Request, at time.Time, ex model.Exchange, err error) {
+	if c.opts.Audit == nil {
+		return
+	}
+	rec := AuditRecord{
+		Seq:      c.auditSeq.Add(1),
+		Time:     at,
+		Method:   ex.Request.Method,
+		URL:      ex.Request.URL,
+		Identity: r.Identity,
+		Cleanup:  isCleanup(ctx),
+		Reason:   ex.Err,
+	}
+	if rec.Identity == "" {
+		rec.Identity = model.AnonymousIdentity().ID
+	}
+	var (
+		refused *ErrRefused
+		scope   *ErrOutOfScope
+		spent   *ErrBudgetExceeded
+		notSent *ErrNotSent
+	)
+	switch {
+	case err == nil && ex.Response != nil:
+		rec.Outcome = "sent"
+		rec.Status = ex.Response.Status
+		rec.Elapsed = ex.Response.Elapsed
+	case errors.As(err, &refused), errors.As(err, &scope), errors.As(err, &spent):
+		rec.Outcome = "refused"
+	case errors.As(err, &notSent):
+		rec.Outcome = "not_sent"
+	default:
+		rec.Outcome = "error"
+	}
+	if aerr := c.opts.Audit(rec); aerr != nil {
+		c.auditBroken.Store(true)
+	}
+}
+
+// do performs one request without recording it.
+func (c *Client) do(ctx context.Context, r Request) (model.Exchange, error) {
 	captured := model.CapturedRequest{
 		Method: strings.ToUpper(r.Method),
 		URL:    c.red.URL(r.URL),
@@ -368,15 +475,47 @@ func (c *Client) Do(ctx context.Context, r Request) (model.Exchange, error) {
 		captured.Body = c.red.Bytes(r.Body)
 	}
 
-	// Pace before doing anything else, so the limit covers every request the
-	// assessment makes rather than every check.
-	if err := c.limiter.wait(ctx); err != nil {
+	// A credential goes only to the origin it belongs to. Scope may name
+	// several hosts; that is authorization to contact them, not to hand each of
+	// them every identity's credential.
+	if r.BoundOrigin != "" {
+		want, werr := scope.ParseOrigin(r.BoundOrigin)
+		got, gerr := scope.ParseOrigin(r.URL)
+		if werr != nil || gerr != nil || got != want {
+			err := &ErrRefused{Method: captured.Method, Target: c.red.URL(r.URL),
+				Reason: "this identity's credential is bound to its target's origin, and the request " +
+					"is to a different origin"}
+			return model.Exchange{Request: captured, Err: c.red.Error(err)}, err
+		}
+	}
+
+	// The safety guard runs first: a refused request sends nothing, waits for
+	// nothing and consumes nothing.
+	if err := c.opts.Guard.check(captured.Method, r.URL, r.Body); err != nil {
+		var refused *ErrRefused
+		if errors.As(err, &refused) {
+			refused.Target = c.red.URL(refused.Target)
+		}
 		return model.Exchange{Request: captured, Err: c.red.Error(err)}, err
 	}
 
-	// Gate one: the URL, before any resolution.
+	// Gate one: the URL, before any resolution, and before anything is spent
+	// on a request that could never be sent.
 	if d := c.policy.CheckURL(r.URL); !d.Allowed {
 		err := &ErrOutOfScope{Target: c.red.URL(r.URL), Reason: d.Reason}
+		return model.Exchange{Request: captured, Err: c.red.Error(err)}, err
+	}
+
+	// The budget is taken before pacing, so a spent budget refuses at once
+	// rather than after waiting for a slot it would not use.
+	if err := c.budget.take(isCleanup(ctx)); err != nil {
+		return model.Exchange{Request: captured, Err: c.red.Error(err)}, err
+	}
+
+	// Pace, so the limit covers every request the assessment makes rather than
+	// every check.
+	if err := c.limiter.wait(ctx); err != nil {
+		err = &ErrNotSent{Err: err}
 		return model.Exchange{Request: captured, Err: c.red.Error(err)}, err
 	}
 

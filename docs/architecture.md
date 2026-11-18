@@ -150,15 +150,24 @@ Provenance never upgrades itself. An inferred expectation that is contradicted b
 
 ## 5. Safety profiles
 
-Strictly ordered: `discovery` < `verification` < `intrusive`.
+Strictly ordered: `safe` < `standard` (default) < `aggressive`. See
+[ADR-0019](adr/0019-safety-enforced-at-the-http-client.md).
 
-Every check declares the impact it requires. If required impact exceeds the effective
-profile, the check **does not run and is recorded as blocked with a cause**. Profiles
-never escalate implicitly; the effective profile is recorded in every result. `intrusive`
-additionally requires explicit authorization in configuration.
+Enforcement has two layers. The planner computes the profile each (check, operation)
+pair needs and records anything beyond the effective profile as **blocked with a
+cause**. Then `httpx.Do`, which every request passes through, decides again from the
+request itself: under `safe` nothing state-changing is sent; under `standard` only the
+exact requests the planner registered for fixtures declared `disposable` (sealed before
+execution); under `aggressive` anything in scope. A client with no guard behaves as
+`safe`. The second layer is what makes a planning mistake, or a check sending something
+other than what it planned, unable to change data.
 
-This is the mechanism that makes "potentially destructive behaviour must never happen
-accidentally" a property of the type system rather than a convention.
+`aggressive` additionally requires `target.disposable: true`, a typed confirmation of the
+target origin, and exact-origin scope entries. Profiles never escalate implicitly; the
+effective profile is recorded in every result.
+
+The same choke point enforces the request budget, binds each identity's credential to
+its target origin, and writes one line per request to `requests.jsonl`.
 
 ---
 
@@ -348,8 +357,9 @@ fail when the corresponding discriminator is removed.
 
 ### Safety
 
-A cross-owner write needs three separate acts of consent: the intrusive profile,
-`authorizeIntrusive`, and a `mutation` block on the fixture. A write with no
+A cross-owner write needs a `mutation` block on the fixture, and either the fixture
+declared `disposable` (under `standard`, as the exact registered request only) or the
+`aggressive` profile. A write with no
 readable operation to observe it is refused rather than sent. Restoration is
 attempted as the owner and verified by re-reading; a failure becomes run-level
 tool state, never a buried detail.

@@ -65,7 +65,7 @@ func (Engine) Meta() scanner.Meta {
 // intrusive either, which would be its own dishonesty: that would imply Sulayi
 // knows the templates are destructive, and it does not know what they are at
 // all.
-func (Engine) RequiredProfile(scanner.Settings) model.Profile { return model.ProfileVerification }
+func (Engine) RequiredProfile(scanner.Settings) model.Profile { return model.ProfileStandard }
 
 // Detect resolves the executable and asks it for its version.
 func (Engine) Detect(ctx context.Context, s scanner.Settings) scanner.Availability {

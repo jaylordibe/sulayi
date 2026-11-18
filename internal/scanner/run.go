@@ -69,6 +69,16 @@ func Run(ctx context.Context, e Engine, t Target, s Settings, opts Options) Outc
 		return finish(out)
 	}
 
+	// Scope, before anything else. An engine whose network traffic Sulayi
+	// cannot constrain is not probed, not given a workspace and not started,
+	// whatever the profile.
+	if !meta.Offline {
+		out.Status = StatusBlocked
+		out.Cause = model.CauseSafetyPolicy
+		out.Detail = NetworkBlockedDetail(meta.Title)
+		return finish(out)
+	}
+
 	// Availability, before anything is attempted.
 	avail := e.Detect(ctx, s)
 	out.Limitations = append(out.Limitations, avail.Warnings...)

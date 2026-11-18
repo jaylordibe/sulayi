@@ -269,3 +269,35 @@ func TestRefusalSaysWhatActuallyFailed(t *testing.T) {
 		}
 	}
 }
+
+// A path prefix confines by whole segments, and a path the server would
+// normalise out of the subtree is never inside it, however it is spelled.
+func TestPathPrefixCannotBeEscaped(t *testing.T) {
+	p := mustPolicy(t, []Entry{{Host: "api.example.com", PathPrefix: "/api"}}, false)
+	for _, ok := range []string{
+		"https://api.example.com/api",
+		"https://api.example.com/api/",
+		"https://api.example.com/api/users/1",
+		"https://api.example.com/api/a%20b",
+	} {
+		if !p.CheckURL(ok).Allowed {
+			t.Errorf("%s denied; it is inside the prefix", ok)
+		}
+	}
+	for _, escape := range []string{
+		"https://api.example.com/apiv2",
+		"https://api.example.com/api/../admin",
+		"https://api.example.com/api/./../admin",
+		"https://api.example.com/api/%2e%2e/admin",
+		"https://api.example.com/api/%2E%2E/admin",
+		"https://api.example.com/api/.%2e/admin",
+		"https://api.example.com/api/..%2fadmin",
+		"https://api.example.com/api/..%5cadmin",
+		"https://api.example.com/api/..\\admin",
+		"https://api.example.com/api/%zz",
+	} {
+		if p.CheckURL(escape).Allowed {
+			t.Errorf("%s allowed; it leaves the /api subtree", escape)
+		}
+	}
+}

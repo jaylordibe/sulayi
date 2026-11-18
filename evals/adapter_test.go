@@ -101,7 +101,7 @@ func runWithAdapter(t *testing.T, handler http.Handler, spec string, docs []adap
 	}
 
 	res, err := engine.Run(context.Background(), engine.Options{
-		RunID: "eval-m3", Target: srv.URL, Profile: model.ProfileVerification,
+		RunID: "eval-m3", Target: srv.URL, Profile: model.ProfileStandard,
 		Surface: surface,
 		Checks: []engine.Check{check.AuthRequired{
 			Client: client, BaselineProbes: 2,

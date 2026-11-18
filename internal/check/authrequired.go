@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -213,7 +214,7 @@ func (c AuthRequired) Run(ctx context.Context, op model.Operation) Result {
 	if err != nil {
 		return Result{
 			Disposition: model.DispositionBlocked,
-			Cause:       model.CauseTransportError,
+			Cause:       transportCause(err),
 			Detail:      "could not establish a catch-all baseline: " + err.Error(),
 			Exchanges:   exchanges,
 		}
@@ -347,9 +348,13 @@ func (c AuthRequired) Run(ctx context.Context, op model.Operation) Result {
 		exchanges = append(exchanges, repeat)
 	}
 	if err != nil || repeat.Response == nil {
+		cause := transportCause(err)
+		if cause == model.CauseNone {
+			cause = model.CauseTransportError
+		}
 		return Result{
 			Disposition: model.DispositionBlocked,
-			Cause:       model.CauseTransportError,
+			Cause:       cause,
 			Detail:      "the confirming request could not be completed, so the result is not reproducible",
 			Exchanges:   exchanges,
 		}
@@ -585,7 +590,7 @@ func (c AuthRequired) baselineFingerprint(ctx context.Context, op model.Operatio
 			exchanges = append(exchanges, ex)
 		}
 		if err != nil {
-			return fingerprint{}, exchanges, fmt.Errorf("%s", summarize(err))
+			return fingerprint{}, exchanges, summarized{msg: summarize(err), err: err}
 		}
 		if ex.Response == nil {
 			return fingerprint{}, exchanges, fmt.Errorf("no response to a baseline probe")
@@ -710,11 +715,32 @@ func transportCause(err error) model.BlockedCause {
 	if err == nil {
 		return model.CauseNone
 	}
-	if strings.Contains(err.Error(), "out of scope") {
+	var outOfScope *httpx.ErrOutOfScope
+	var refused *httpx.ErrRefused
+	var budget *httpx.ErrBudgetExceeded
+	switch {
+	case errors.As(err, &outOfScope):
 		return model.CauseOutOfScope
+	case errors.As(err, &refused):
+		return model.CauseSafetyPolicy
+	case errors.As(err, &budget):
+		return model.CauseBudgetExceeded
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return model.CauseCancelled
 	}
 	return model.CauseTransportError
 }
+
+// summarized shortens an error's text for a ledger line while keeping the
+// error itself reachable, so the reason it happened — a safety refusal, a spent
+// budget, a cancellation — still decides the ledger cause.
+type summarized struct {
+	msg string
+	err error
+}
+
+func (s summarized) Error() string { return s.msg }
+func (s summarized) Unwrap() error { return s.err }
 
 // summarize renders an error briefly. The error has already been redacted by the
 // HTTP client before it reaches evidence; this is for a ledger detail line.

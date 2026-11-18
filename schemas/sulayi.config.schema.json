@@ -29,6 +29,10 @@
         "name": {
           "type": "string",
           "maxLength": 200
+        },
+        "disposable": {
+          "type": "boolean",
+          "description": "Declares the target an isolated environment whose data may be changed or destroyed. Required by the aggressive profile."
         }
       }
     },
@@ -82,15 +86,30 @@
       "properties": {
         "profile": {
           "enum": [
-            "discovery",
-            "verification",
-            "intrusive"
+            "safe",
+            "standard",
+            "aggressive"
           ],
-          "description": "Safety profile. Strictly ordered; never escalates implicitly."
+          "description": "Safety profile. Strictly ordered; never escalates implicitly. safe: read-only. standard (default): also state-changing requests against the exact fixtures registered with disposable: true. aggressive: any in-scope target; requires target.disposable and a confirmation."
         },
-        "authorizeIntrusive": {
-          "type": "boolean",
-          "description": "Required for the intrusive profile. Selecting a profile is not by itself authorization to use it."
+        "maxRequests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Hard limit on requests sent to the target. Default 1000. A small allowance above it is reserved for restoring fixtures."
+        },
+        "maxDurationMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "Hard limit on the assessment's wall-clock duration. Default 30."
+        },
+        "stateChangingOperations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Operation ids that change state despite a read-only method, e.g. \"GET /logout\". Treated as state-changing whatever their method."
         },
         "concurrency": {
           "type": "integer",
@@ -266,6 +285,10 @@
             ],
             "description": "Required. \"denied\" means non-owners must not reach the resource, which is the boundary a BOLA check tests. \"allowed\" means the resource is legitimately shared, so a non-owner reaching it is expected and is never a finding."
           },
+          "disposable": {
+            "type": "boolean",
+            "description": "Declares this exact resource disposable test data. Under the standard profile, state-changing requests are permitted only against the exact requests bound from disposable fixtures."
+          },
           "values": {
             "type": "object",
             "minProperties": 1,
@@ -301,7 +324,7 @@
             "required": [
               "values"
             ],
-            "description": "Enables cross-owner write testing. Writes require the intrusive profile and explicit authorizeIntrusive, and a write is confirmed only by re-reading as the owner: an HTTP success never confirms one.",
+            "description": "Enables cross-owner write testing. Under the standard profile a write is sent only when the fixture is declared disposable, as the exact bound request changing only these fields; otherwise it requires the aggressive profile. A write is confirmed only by re-reading as the owner: an HTTP success never confirms one.",
             "properties": {
               "values": {
                 "type": "object",

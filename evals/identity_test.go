@@ -99,7 +99,7 @@ func runWithIdentity(t *testing.T, handler http.Handler, opt identityOptions) (e
 	res, err := engine.Run(context.Background(), engine.Options{
 		RunID:   "eval",
 		Target:  srv.URL,
-		Profile: model.ProfileVerification,
+		Profile: model.ProfileStandard,
 		Surface: engine.Surface{
 			SpecDerived: true, Operations: parsed.Operations, Fidelity: parsed.Fidelity,
 		},
@@ -675,7 +675,7 @@ func runWithIdentityAndSink(
 	res, err := engine.Run(context.Background(), engine.Options{
 		RunID:   "20260906T120000Z-eval0001",
 		Target:  srv.URL,
-		Profile: model.ProfileVerification,
+		Profile: model.ProfileStandard,
 		Surface: engine.Surface{SpecDerived: true, Operations: parsed.Operations, Fidelity: parsed.Fidelity},
 		Checks: []engine.Check{check.AuthRequired{
 			Client: client, BaselineProbes: 2, Control: ids.Primary(),

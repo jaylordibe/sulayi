@@ -202,7 +202,10 @@ func (c *Control) DoWithBody(
 	for k, v := range c.Headers() {
 		header[k] = v
 	}
-	return c.client.Do(ctx, httpx.Request{Method: method, URL: url, Header: header, Body: body})
+	return c.client.Do(ctx, httpx.Request{
+		Method: method, URL: url, Header: header, Body: body,
+		Identity: c.ID(), BoundOrigin: c.baseURL,
+	})
 }
 
 // NoteSuspicious reports that an authenticated request produced a result

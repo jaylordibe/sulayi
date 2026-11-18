@@ -217,7 +217,13 @@ func WriteSARIF(w io.Writer, doc Document) error {
 		ruleList = append(ruleList, rules[id])
 	}
 
-	notifications := make([]sarifNotification, 0, len(doc.ToolFailures))
+	notifications := make([]sarifNotification, 0, len(doc.ToolFailures)+len(doc.CleanupIncomplete))
+	for _, f := range doc.CleanupIncomplete {
+		notifications = append(notifications, sarifNotification{
+			Level:   "error",
+			Message: sarifText{Text: "cleanup incomplete: " + f},
+		})
+	}
 	for _, f := range doc.ToolFailures {
 		notifications = append(notifications, sarifNotification{
 			Level:   "error",

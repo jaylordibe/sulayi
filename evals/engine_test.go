@@ -58,6 +58,9 @@ func (j jsonlEngine) Meta() scanner.Meta {
 		ID: "fakescan", Title: "FakeScan", Capabilities: j.caps,
 		Unlocks:     "a weakness class Sulayi does not test natively",
 		InstallHint: "it is a test fixture",
+		// It stands in for an engine whose traffic is constrained, so that the
+		// import pipeline can be exercised; network engines are blocked.
+		Offline: true,
 	}
 }
 
@@ -68,7 +71,7 @@ func (j jsonlEngine) Detect(context.Context, scanner.Settings) scanner.Availabil
 	return scanner.Availability{Present: true, Path: j.bin, Version: "1.2.3"}
 }
 
-func (jsonlEngine) RequiredProfile(scanner.Settings) model.Profile { return model.ProfileVerification }
+func (jsonlEngine) RequiredProfile(scanner.Settings) model.Profile { return model.ProfileStandard }
 
 func (j jsonlEngine) Invocation(
 	t scanner.Target, s scanner.Settings, w scanner.Workspace, a scanner.Availability,
@@ -118,11 +121,11 @@ const sqlClass = scanner.Capability("CWE-89 SQL injection")
 func runWithEngine(t *testing.T, e scanner.Engine, s scanner.Settings) engine.Result {
 	t.Helper()
 	coll := scanner.RunAll(context.Background(), []scanner.Registered{{Engine: e, Settings: s}},
-		scanner.Target{BaseURL: "http://127.0.0.1:1", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:1", Profile: model.ProfileStandard},
 		scanner.Options{RunID: "eval-m4"})
 
 	res, err := engine.Run(context.Background(), engine.Options{
-		RunID: "eval-m4", Target: "http://127.0.0.1:1", Profile: model.ProfileVerification,
+		RunID: "eval-m4", Target: "http://127.0.0.1:1", Profile: model.ProfileStandard,
 		Surface:     engine.Surface{SpecDerived: true},
 		Engines:     coll,
 		Concurrency: 1, RequestsPerSecond: 100,
@@ -331,7 +334,7 @@ func TestM4_AgreementBetweenEnginesIsNotConfirmation(t *testing.T) {
 	coll := scanner.RunAll(context.Background(), []scanner.Registered{
 		{Engine: jsonlEngine{bin: bin}, Settings: scanner.Settings{Enabled: true, TimeoutSeconds: 30}},
 		{Engine: secondEngine{jsonlEngine{bin: bin}}, Settings: scanner.Settings{Enabled: true, TimeoutSeconds: 30}},
-	}, scanner.Target{BaseURL: "http://127.0.0.1:1", Profile: model.ProfileVerification},
+	}, scanner.Target{BaseURL: "http://127.0.0.1:1", Profile: model.ProfileStandard},
 		scanner.Options{RunID: "eval"})
 
 	if len(coll.Findings) != 2 {

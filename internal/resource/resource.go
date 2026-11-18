@@ -117,6 +117,10 @@ type Fixture struct {
 	// resource has to be asked for.
 	Mutation *Mutation
 	// Provenance records how the fixture was obtained.
+	// Disposable declares this exact resource disposable test data. Under the
+	// standard profile it is the only thing a state-changing request may target,
+	// and only through the exact requests bound from it.
+	Disposable bool
 	Provenance Provenance
 }
 

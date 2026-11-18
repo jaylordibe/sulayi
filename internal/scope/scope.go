@@ -179,7 +179,7 @@ func (p *Policy) CheckURL(raw string) Decision {
 		if !portMatches(e, u.Scheme, port) {
 			continue
 		}
-		if e.PathPrefix != "" && !strings.HasPrefix(pathOrRoot(u), e.PathPrefix) {
+		if e.PathPrefix != "" && !pathWithin(e.PathPrefix, u) {
 			continue
 		}
 		return Decision{true, fmt.Sprintf("matched scope entry %s", e.String())}
@@ -366,11 +366,30 @@ func portMatches(e Entry, scheme string, port int) bool {
 	return false
 }
 
-func pathOrRoot(u *url.URL) string {
-	if u.Path == "" {
-		return "/"
+// pathWithin reports whether u's path lies inside prefix.
+//
+// The comparison is by whole segments, so "/api" grants "/api" and "/api/x" but
+// not "/apiv2". And a path carrying a dot segment, or an encoded separator, is
+// never within a prefix: the server normalises "/api/../admin" or
+// "/api/%2e%2e/admin" to "/admin", so a string comparison on the request would
+// grant a path the server then resolves outside the subtree.
+func pathWithin(prefix string, u *url.URL) bool {
+	p := u.EscapedPath()
+	if p == "" {
+		p = "/"
 	}
-	return u.Path
+	for _, seg := range strings.Split(p, "/") {
+		dec, err := url.PathUnescape(seg)
+		if err != nil || dec == "." || dec == ".." ||
+			strings.ContainsAny(dec, "/\\") {
+			return false
+		}
+	}
+	base := strings.TrimRight(prefix, "/")
+	if base == "" {
+		return true
+	}
+	return p == base || strings.HasPrefix(p, base+"/")
 }
 
 // SplitHostPort is a convenience wrapper used by the dialer, which receives an

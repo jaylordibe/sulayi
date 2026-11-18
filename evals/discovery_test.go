@@ -137,7 +137,7 @@ func m5Run(t *testing.T, srv *httptest.Server, adapterDocs []adapter.Document) r
 	surface.DiscoveryBytes = found.Bytes
 
 	res, err := engine.Run(context.Background(), engine.Options{
-		RunID: "m5-eval", Target: srv.URL, Profile: model.ProfileVerification,
+		RunID: "m5-eval", Target: srv.URL, Profile: model.ProfileStandard,
 		Surface: surface,
 		Checks:  []engine.Check{check.AuthRequired{Client: client, BaselineProbes: 1, Now: now}},
 		Now:     now,

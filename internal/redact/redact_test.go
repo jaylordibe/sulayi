@@ -186,3 +186,23 @@ func TestLongAuthSchemesAreLearned(t *testing.T) {
 		}
 	}
 }
+
+// Set-Cookie attributes are not secrets. Learning them would blank the
+// target's own hostname, path and expiry out of every later exchange, which
+// destroys evidence without protecting anything. The cookie's value, quoted or
+// not, is still learned.
+func TestSetCookieLearnsOnlyTheCookieValue(t *testing.T) {
+	r := New()
+	r.Header(map[string][]string{"Set-Cookie": {
+		`sid="q0uoted5ecretvalue"; Domain=staging.example.test; Path=/account; Expires=Wed, 21 Oct 2026 07:28:00 GMT; SameSite=Lax`,
+	}})
+	got := r.String("GET https://staging.example.test/account/orders sid=q0uoted5ecretvalue SameSite=Lax")
+	if strings.Contains(got, "q0uoted5ecretvalue") {
+		t.Errorf("the cookie value was not learned: %q", got)
+	}
+	for _, kept := range []string{"staging.example.test", "/account", "Lax"} {
+		if !strings.Contains(got, kept) {
+			t.Errorf("attribute value %q was treated as a secret: %q", kept, got)
+		}
+	}
+}

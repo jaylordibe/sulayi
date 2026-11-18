@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -459,5 +460,66 @@ func TestSetAccessors(t *testing.T) {
 	}
 	if len(set.Statuses()) != 2 {
 		t.Error("Statuses did not report every identity")
+	}
+}
+
+// Scope may name several hosts. That authorizes contacting them; it does not
+// authorize handing each of them every identity's credential. A request from an
+// identity to any origin but its target's is refused before anything is sent.
+func TestCredentialIsNeverSentToAnotherInScopeOrigin(t *testing.T) {
+	const secret = "SULAYI_M1_SECRET_MUST_NEVER_PERSIST_7f91"
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer target.Close()
+	var siblingHits atomic.Int64
+	var leaked atomic.Bool
+	sibling := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		siblingHits.Add(1)
+		if strings.Contains(r.Header.Get("Authorization"), secret) {
+			leaked.Store(true)
+		}
+	}))
+	defer sibling.Close()
+
+	portOf := func(u string) int {
+		parts := strings.Split(u, ":")
+		var p int
+		if _, err := fmt.Sscanf(parts[len(parts)-1], "%d", &p); err != nil {
+			t.Fatalf("port: %v", err)
+		}
+		return p
+	}
+	pol, err := scope.New([]scope.Entry{
+		{Host: "127.0.0.1", Ports: []int{portOf(target.URL), portOf(sibling.URL)}},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	red := redact.New()
+	c, err := httpx.New(httpx.Options{Policy: pol, Redactor: red, Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	t.Setenv("SULAYI_TEST_BOUND", secret)
+	set := Resolve([]Identity{{
+		ID:   "alice",
+		Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_BOUND"}},
+	}}, target.URL, c, red)
+	ctl, ok := set.ByID("alice")
+	if !ok {
+		t.Fatal("identity did not resolve")
+	}
+
+	if _, err := ctl.Do(context.Background(), "GET", target.URL+"/me", nil); err != nil {
+		t.Fatalf("a request to the identity's own origin failed: %v", err)
+	}
+	_, err = ctl.Do(context.Background(), "GET", sibling.URL+"/me", nil)
+	var refused *httpx.ErrRefused
+	if !errors.As(err, &refused) {
+		t.Fatalf("err = %v, want a refusal", err)
+	}
+	if siblingHits.Load() != 0 || leaked.Load() {
+		t.Fatalf("the in-scope sibling origin received %d request(s); leaked = %v", siblingHits.Load(), leaked.Load())
 	}
 }

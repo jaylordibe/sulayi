@@ -68,6 +68,30 @@ type Meta struct {
 	// InstallHint tells an operator how to get it, without Sulayi fetching
 	// anything itself.
 	InstallHint string
+	// Offline declares that the integration opens no network connection of its
+	// own: it reads local input and nothing else. An engine that is not offline
+	// makes connections Sulayi's scope enforcement cannot see, so it is never
+	// run (see NetworkBlockedDetail). The zero value is "not offline", so an
+	// integration that forgets to say is blocked rather than trusted.
+	Offline bool
+}
+
+// NetworkBlockedDetail explains why an engine that makes its own network
+// connections was not run.
+//
+// Sulayi enforces scope where it makes requests: on the URL, on every resolved
+// address at dial time, and with no redirect following. An external engine
+// opens its own connections, so none of that applies to it, and a security tool
+// that bypasses the boundary it is meant to work within is not acceptable in any
+// profile. Until a verified mechanism constrains an engine's outbound
+// destinations to the authorized scope, such engines are blocked. This is a
+// temporary limitation of the integration, not a decision to remove it.
+func NetworkBlockedDetail(title string) string {
+	return title + " was not run: it opens its own network connections, and Sulayi cannot " +
+		"constrain their destinations to the authorized scope, so running it would bypass " +
+		"Sulayi's scope enforcement. It is blocked in every profile until a verified " +
+		"outbound-destination control exists. No result from this engine was imported, and the " +
+		"weakness classes it would have covered remain unassessed"
 }
 
 // Availability is what was learned about an engine without scanning.

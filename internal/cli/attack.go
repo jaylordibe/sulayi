@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -47,6 +48,7 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 		profile    string
 		outputDir  string
 		noProbe    bool
+		yes        bool
 	)
 
 	cmd := &cobra.Command{
@@ -83,6 +85,11 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 			if err := cfg.Validate(); err != nil {
 				return fail(ExitUsage, "%v", err)
 			}
+			if cfg.Profile() == model.ProfileAggressive {
+				if err := confirmAggressive(cfg, yes, stderr); err != nil {
+					return err
+				}
+			}
 			return runScan(cmd.Context(), cfg, stdout, stderr)
 		},
 	}
@@ -90,9 +97,11 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to sulayi.yaml (default: ./sulayi.yaml if present)")
 	cmd.Flags().StringVar(&specFile, "spec", "", "path to an OpenAPI document on disk")
 	cmd.Flags().StringVar(&specURL, "spec-url", "", "URL of an OpenAPI document served by the target")
-	cmd.Flags().StringVar(&profile, "profile", "", "safety profile: discovery, verification, intrusive")
+	cmd.Flags().StringVar(&profile, "profile", "", "safety profile: safe, standard (default), aggressive")
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "run output directory (default: .sulayi)")
 	cmd.Flags().BoolVar(&noProbe, "no-probe", false, "do not probe well-known specification paths")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the aggressive-profile confirmation prompt; "+
+		"needed when there is no terminal. It changes nothing else")
 	return cmd
 }
 
@@ -177,6 +186,13 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// The duration limit bounds the whole assessment, discovery included.
+	// Restoring a fixture is deliberately outside it: that runs on its own
+	// short, bounded context so that running out of time cannot be the reason
+	// data is left modified.
+	ctx, cancelDeadline := context.WithTimeout(ctx,
+		time.Duration(cfg.Assessment.MaxDurationMinutes)*time.Minute)
+	defer cancelDeadline()
 	now := time.Now
 	runID := newRunID(now())
 
@@ -186,6 +202,24 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 	}
 	red := redact.New()
 
+	// The run directory is created before the first request, so evidence can be
+	// written as it is captured and the request log covers discovery as well as
+	// the assessment.
+	run, err := store.Create(cfg.Output.Dir, runID, now())
+	if err != nil {
+		return fail(ExitInternal, "%v", err)
+	}
+	if err := run.WriteFingerprintKey(red.FingerprintKey()); err != nil {
+		return fail(ExitInternal, "%v", err)
+	}
+
+	// The guard is built from the same validated profile the plan uses, and the
+	// engine refuses to run if the two ever disagree.
+	guard, err := httpx.NewGuard(cfg.Profile(), cfg.Assessment.StateChangingOperations)
+	if err != nil {
+		return fail(ExitUsage, "%v", err)
+	}
+
 	client, err := httpx.New(httpx.Options{
 		Policy:            policy,
 		Redactor:          red,
@@ -193,6 +227,16 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 		MaxBodyBytes:      httpx.DefaultMaxBodyBytes,
 		Now:               now,
 		RequestsPerSecond: cfg.Assessment.RequestsPerSecond,
+		MaxRequests:       cfg.Assessment.MaxRequests,
+		CleanupAllowance:  cleanupAllowance(cfg),
+		Guard:             guard,
+		Audit: func(r httpx.AuditRecord) error {
+			return run.LogRequest(store.RequestLogEntry{
+				Seq: r.Seq, Time: r.Time, Method: r.Method, URL: r.URL, Identity: r.Identity,
+				Cleanup: r.Cleanup, Outcome: r.Outcome, Reason: r.Reason, Status: r.Status,
+				ElapsedMs: r.Elapsed.Milliseconds(),
+			})
+		},
 	})
 	if err != nil {
 		return fail(ExitInternal, "%v", err)
@@ -291,16 +335,6 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 		}
 	}
 
-	// The run directory is created before the assessment starts, so evidence can
-	// be written as it is captured rather than buffered in memory until the end.
-	run, err := store.Create(cfg.Output.Dir, runID, now())
-	if err != nil {
-		return fail(ExitInternal, "%v", err)
-	}
-	if err := run.WriteFingerprintKey(red.FingerprintKey()); err != nil {
-		return fail(ExitInternal, "%v", err)
-	}
-
 	// Identities are resolved before any request is possible, so that every
 	// credential is registered with the redactor before the first exchange can
 	// be captured. Resolution never fails the run: an identity whose credential
@@ -366,31 +400,48 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 		fmt.Fprintf(stderr, "sulayi: %s\n", f)
 	}
 
+	// An operator may name a state-changing operation in the specification's
+	// spelling, which is relative to its server URL. The guard sees request
+	// URLs, so it is also given the application-absolute spelling of every
+	// operation the name matches. Registration closes when planning ends.
+	for _, op := range surface.Operations {
+		if op.MatchesAnyID(cfg.Assessment.StateChangingOperations) {
+			if err := guard.AddStateChangingTemplate(op.Method + " " + op.AbsolutePath()); err != nil {
+				return fail(ExitInternal, "%v", err)
+			}
+		}
+	}
+
 	res, err := engine.Run(ctx, engine.Options{
-		RunID:                runID,
-		Target:               cfg.Target.BaseURL,
-		TargetName:           cfg.Target.Name,
-		Profile:              cfg.Profile(),
-		Surface:              surface,
-		Checks:               checks,
-		Environment:          engine.Environment{Name: cfg.Environment.Name, Differences: cfg.Environment.Differences},
-		ScopeEntries:         scopeStrings(policy),
-		AllowPrivate:         cfg.Scope.AllowPrivateAddresses,
-		ExcludeOperations:    cfg.Assessment.ExcludeOperations,
-		ExcludeAuthEndpoints: cfg.ShouldExcludeAuthEndpoints(),
-		Concurrency:          cfg.Assessment.Concurrency,
-		RequestsPerSecond:    cfg.Assessment.RequestsPerSecond,
-		Identities:           identities,
-		Resources:            fixtures,
-		ResourceCheck:        check.CrossOwner{Signals: signals, Now: now},
-		Now:                  now,
-		Engines:              engines,
-		EvidenceSink:         run.PutEvidence,
+		RunID:                   runID,
+		Target:                  cfg.Target.BaseURL,
+		TargetName:              cfg.Target.Name,
+		Profile:                 cfg.Profile(),
+		Surface:                 surface,
+		Checks:                  checks,
+		Environment:             engine.Environment{Name: cfg.Environment.Name, Differences: cfg.Environment.Differences},
+		ScopeEntries:            scopeStrings(policy),
+		AllowPrivate:            cfg.Scope.AllowPrivateAddresses,
+		ExcludeOperations:       cfg.Assessment.ExcludeOperations,
+		StateChangingOperations: cfg.Assessment.StateChangingOperations,
+		Guard:                   guard,
+		ExcludeAuthEndpoints:    cfg.ShouldExcludeAuthEndpoints(),
+		Concurrency:             cfg.Assessment.Concurrency,
+		RequestsPerSecond:       cfg.Assessment.RequestsPerSecond,
+		Identities:              identities,
+		Resources:               fixtures,
+		ResourceCheck:           check.CrossOwner{Signals: signals, Now: now},
+		Now:                     now,
+		Engines:                 engines,
+		EvidenceSink:            run.PutEvidence,
 	})
 	if err != nil {
 		return fail(ExitInternal, "%v", err)
 	}
 	res.OutOfScopeHosts = policy.OutOfScopeHosts()
+	usage := client.Usage()
+	res.Requests, res.RequestLimit, res.CleanupRequests = usage.Used, usage.Limit, usage.CleanupUsed
+	res.StoppedEarly = stoppedEarly(ctx, cfg, usage, res)
 
 	return persistAndSummarize(res, run, cfg.Policy, stdout, stderr)
 }
@@ -528,4 +579,86 @@ func newRunID(t time.Time) string {
 		return t.UTC().Format("20060102T150405Z")
 	}
 	return t.UTC().Format("20060102T150405Z") + "-" + hex.EncodeToString(b)
+}
+
+// CleanupRequestsPerWrite is the most a single cross-owner write needs after it
+// is sent: the owner's after-read, the restoring write and its verification,
+// with one to spare.
+const CleanupRequestsPerWrite = 4
+
+// cleanupAllowance sizes the requests reserved above the budget for restoring
+// fixtures: enough for every write the configuration could make, and no more.
+func cleanupAllowance(cfg config.Config) int {
+	attackers := len(cfg.Identities) - 1
+	if attackers < 1 {
+		attackers = 1
+	}
+	var writes int
+	for _, r := range cfg.Resources {
+		if r.Mutation != nil {
+			writes += attackers
+		}
+	}
+	return writes * CleanupRequestsPerWrite
+}
+
+// stoppedEarly says why an assessment ended before finishing its plan, or ""
+// when it did not.
+func stoppedEarly(ctx context.Context, cfg config.Config, usage httpx.BudgetUsage, res engine.Result) string {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Sprintf("the %d-minute duration limit (assessment.maxDurationMinutes) was reached",
+			cfg.Assessment.MaxDurationMinutes)
+	case errors.Is(ctx.Err(), context.Canceled):
+		return "the assessment was interrupted"
+	}
+	if usage.Limit > 0 && usage.Used >= usage.Limit {
+		for _, e := range res.Coverage {
+			if e.Cause == model.CauseBudgetExceeded {
+				return fmt.Sprintf("the %d-request budget (assessment.maxRequests) was spent", usage.Limit)
+			}
+		}
+	}
+	return ""
+}
+
+// confirmationInput supplies the operator's answer to the aggressive-profile
+// prompt, and whether there is a terminal to ask on. It is a variable so that
+// tests can answer the prompt.
+var confirmationInput = func() (io.Reader, bool) {
+	info, err := os.Stdin.Stat()
+	return os.Stdin, err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// confirmAggressive is the last gate before aggressive testing starts.
+//
+// The configuration has already declared the target disposable; this asks the
+// person running the command to say which target they mean, by typing its exact
+// origin. Typing the name, rather than answering y, is the established pattern
+// for irreversible operations: it cannot be answered by reflex, and it catches a
+// configuration copied from the wrong environment. --yes replaces the prompt for
+// a run with no terminal and changes nothing else.
+func confirmAggressive(cfg config.Config, yes bool, stderr io.Writer) error {
+	origin, err := scope.ParseOrigin(cfg.Target.BaseURL)
+	if err != nil {
+		return fail(ExitUsage, "the target's origin could not be established, so aggressive "+
+			"testing cannot be confirmed: %v", err)
+	}
+	want := origin.String()
+	if yes {
+		fmt.Fprintf(stderr, "sulayi: aggressive profile confirmed by --yes for %s\n", want)
+		return nil
+	}
+	in, terminal := confirmationInput()
+	if !terminal {
+		return fail(ExitUsage, "the aggressive profile needs confirmation and there is no terminal "+
+			"to ask on. Run it interactively, or pass --yes to confirm %s", want)
+	}
+	fmt.Fprintf(stderr, "The aggressive profile may change or destroy any data %s holds.\n"+
+		"Type the target origin to confirm: ", want)
+	line, _ := bufio.NewReader(in).ReadString('\n')
+	if strings.TrimSpace(line) != want {
+		return fail(ExitUsage, "confirmation did not match %s; nothing was sent", want)
+	}
+	return nil
 }

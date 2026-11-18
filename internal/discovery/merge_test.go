@@ -183,8 +183,8 @@ func TestTemplateMatchingDoesNotCrossSegments(t *testing.T) {
 		"trailing slash tolerated":  {"/a/b", "/a/b/", true},
 	}
 	for name, tc := range cases {
-		if got := templateMatches(tc.template, tc.path); got != tc.want {
-			t.Errorf("%s: templateMatches(%q, %q) = %v, want %v",
+		if got := model.PathMatchesTemplate(tc.template, tc.path); got != tc.want {
+			t.Errorf("%s: model.PathMatchesTemplate(%q, %q) = %v, want %v",
 				name, tc.template, tc.path, got, tc.want)
 		}
 	}

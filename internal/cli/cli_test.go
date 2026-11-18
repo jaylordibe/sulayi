@@ -2,14 +2,21 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/jaylordibe/sulayi/internal/config"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/httpx"
 	"github.com/jaylordibe/sulayi/internal/store"
 )
 
@@ -74,11 +81,11 @@ func TestLegacyConfigFileStopsTheRun(t *testing.T) {
 
 func TestInvalidProfileFailsWithUsage(t *testing.T) {
 	t.Chdir(t.TempDir())
-	code, _, errOut := run(t, "attack", "http://127.0.0.1:1/", "--profile", "aggressive")
+	code, _, errOut := run(t, "attack", "http://127.0.0.1:1/", "--profile", "reckless")
 	if code != ExitUsage {
 		t.Fatalf("exit = %d, want %d", code, ExitUsage)
 	}
-	if !strings.Contains(errOut, "discovery, verification, intrusive") {
+	if !strings.Contains(errOut, "safe, standard, aggressive") {
 		t.Errorf("error does not list valid profiles: %q", errOut)
 	}
 }
@@ -116,7 +123,7 @@ func TestAllBlockedRunDoesNotReportSuccess(t *testing.T) {
 	defer srv.Close()
 	t.Chdir(t.TempDir())
 
-	// POST requires the intrusive profile, so nothing may run.
+	// POST requires the aggressive profile, so nothing may run.
 	code, _, errOut := run(t, "attack", srv.URL)
 	if code != ExitNothingExecuted {
 		t.Fatalf("exit = %d, want %d (nothing executed)", code, ExitNothingExecuted)
@@ -299,7 +306,9 @@ func TestDoctorReportsMissingEnginesWithoutFailing(t *testing.T) {
 		// An absent engine must say what it would unlock and how to get it,
 		// because "not found" alone tells an operator nothing about what they
 		// are missing.
-		"not found", "Install Nuclei from",
+		"not found", "Install opengrep",
+		// A network engine is reported as blocked, with why, and is not executed.
+		"BLOCKED", "cannot constrain their destinations",
 		// And doctor must state that it changes nothing: it is a diagnostic,
 		// and a security tool that installs software is a supply chain.
 		"never downloads or installs an engine",
@@ -534,5 +543,317 @@ func TestScanWarnsAboutAnUnresolvableCredential(t *testing.T) {
 	}
 	if !sawIdentityRow {
 		t.Error("the coverage ledger does not carry the blocked identity row")
+	}
+}
+
+// A network engine the operator enabled is refused, and the terminal says that
+// coverage was reduced and why, rather than printing a run that reads clean.
+// The configured executable is a script that records being started; it must
+// never be.
+func TestEnabledNetworkEngineIsBlockedAndTheTerminalSaysCoverageWasReduced(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the tripwire executable is a POSIX shell script")
+	}
+	spec := `{"openapi":"3.0.3","info":{"title":"t","version":"1"},
+	  "paths":{"/api/open":{"get":{"security":[]}}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/openapi.json" {
+			_, _ = w.Write([]byte(spec))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	marker := filepath.Join(dir, "nuclei-started")
+	bin := filepath.Join(dir, "nuclei")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ntouch '"+marker+"'\necho v9.9.9\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	templates := filepath.Join(dir, "templates")
+	if err := os.Mkdir(templates, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
+		"engines:\n  nuclei:\n    enabled: true\n    executable: " + bin + "\n    templates: " + templates + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, out, _ := run(t, "attack")
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the Nuclei executable was started")
+	}
+	flat := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(flat, "COVERAGE REDUCED") || !strings.Contains(flat, "cannot constrain") {
+		t.Errorf("the terminal does not say coverage was reduced by the scope block:\n%s", out)
+	}
+}
+
+// A run that spends its request budget writes its report, says in the terminal
+// that it stopped early and why, records the unreached work as blocked by the
+// budget, and does not exit as though it had completed.
+func TestRequestBudgetStopsTheRunAndSaysSo(t *testing.T) {
+	spec := `{"openapi":"3.0.3","info":{"title":"t","version":"1"},"paths":{
+	  "/api/a":{"get":{"security":[{"bearer":[]}]}},
+	  "/api/b":{"get":{"security":[{"bearer":[]}]}},
+	  "/api/c":{"get":{"security":[{"bearer":[]}]}}}}`
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(401)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "openapi.json"), []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
+		"assessment:\n  maxRequests: 1\ndiscovery:\n  probeWellKnownPaths: false\n"
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errOut := run(t, "attack", "--spec", "openapi.json")
+	if code != ExitAborted {
+		t.Fatalf("exit = %d, want %d (aborted)\nstdout: %s\nstderr: %s", code, ExitAborted, out, errOut)
+	}
+	if got := hits.Load(); got > 1 {
+		t.Errorf("the target received %d requests against a budget of 1", got)
+	}
+	flat := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(flat, "STOPPED EARLY") || !strings.Contains(flat, "maxRequests") {
+		t.Errorf("the summary does not say the budget stopped the run:\n%s", out)
+	}
+	if !strings.Contains(out, "requests: 1 of 1") {
+		t.Errorf("the summary does not state the requests sent against the limit:\n%s", out)
+	}
+	reports, _ := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "report.json"))
+	if len(reports) != 1 {
+		t.Fatalf("report.json files = %d, want 1: a stopped run must still write its report", len(reports))
+	}
+	data, err := os.ReadFile(reports[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"budget_exceeded"`) || !strings.Contains(string(data), `"stoppedEarly"`) {
+		t.Error("the report does not record the unreached work or why the run stopped")
+	}
+}
+
+func TestStoppedEarlyNamesTheReason(t *testing.T) {
+	cfg := config.Default()
+	expired, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-expired.Done()
+	if got := stoppedEarly(expired, cfg, httpx.BudgetUsage{}, engine.Result{}); !strings.Contains(got, "maxDurationMinutes") {
+		t.Errorf("deadline: %q", got)
+	}
+	interrupted, stop := context.WithCancel(context.Background())
+	stop()
+	if got := stoppedEarly(interrupted, cfg, httpx.BudgetUsage{}, engine.Result{}); !strings.Contains(got, "interrupted") {
+		t.Errorf("interrupt: %q", got)
+	}
+	// Using exactly the budget and finishing is not stopping early.
+	full := httpx.BudgetUsage{Limit: 5, Used: 5}
+	if got := stoppedEarly(context.Background(), cfg, full, engine.Result{}); got != "" {
+		t.Errorf("a run that finished within its budget was reported as stopped: %q", got)
+	}
+}
+
+// The request log is part of the run directory, so it is held to the same rule
+// as everything else there: a credential the target reflects back must not
+// reach disk. The target here echoes the bearer token in a header, a body and a
+// Location; every byte of every file under .sulayi is searched.
+func TestRequestLogRecordsEveryRequestAndNoCredential(t *testing.T) {
+	const secret = "SULAYI_M1_SECRET_MUST_NEVER_PERSIST_7f91a2c4d8e6b0f3"
+	spec := `{"openapi":"3.0.3","info":{"title":"t","version":"1"},"paths":{
+	  "/api/me":{"get":{"security":[{"bearer":[]}]}},
+	  "/api/orders":{"get":{"security":[{"bearer":[]}]}}}}`
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		auth := r.Header.Get("Authorization")
+		w.Header().Set("X-Echo", auth)
+		w.Header().Set("Location", "/next?token="+strings.TrimPrefix(auth, "Bearer "))
+		if auth == "" {
+			w.WriteHeader(401)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"seen":"` + auth + `"}`))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "openapi.json"), []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
+		"discovery:\n  probeWellKnownPaths: false\n" +
+		"identities:\n  - id: alice\n    authentication:\n      type: bearer\n" +
+		"      credential:\n        env: SULAYI_LOG_TOKEN\n" +
+		"    liveness:\n      method: GET\n      path: /api/me\n      expectStatus: [200]\n"
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SULAYI_LOG_TOKEN", secret)
+
+	run(t, "attack", "--spec", "openapi.json")
+
+	logs, _ := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "requests.jsonl"))
+	if len(logs) != 1 {
+		t.Fatalf("requests.jsonl files = %d, want 1", len(logs))
+	}
+	data, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if int64(len(lines)) < hits.Load() {
+		t.Errorf("the log has %d lines but the target received %d requests", len(lines), hits.Load())
+	}
+	var sawAlice bool
+	for i, l := range lines {
+		var e store.RequestLogEntry
+		if err := json.Unmarshal([]byte(l), &e); err != nil {
+			t.Fatalf("line %d is not a log entry: %v", i+1, err)
+		}
+		if e.Seq != int64(i+1) {
+			t.Errorf("line %d has seq %d; the log has a gap or is out of order", i+1, e.Seq)
+		}
+		if e.Identity == "alice" {
+			sawAlice = true
+		}
+	}
+	if !sawAlice {
+		t.Error("no log line names the identity that sent it")
+	}
+	if info, err := os.Stat(logs[0]); err == nil && runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Errorf("requests.jsonl mode = %o, want 600", info.Mode().Perm())
+	}
+
+	_ = filepath.Walk(filepath.Join(dir, ".sulayi"), func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		b, rerr := os.ReadFile(p)
+		if rerr != nil {
+			t.Errorf("read %s: %v", p, rerr)
+			return nil
+		}
+		if bytes.Contains(b, []byte(secret)) {
+			t.Errorf("%s contains the credential", p)
+		}
+		return nil
+	})
+}
+
+// aggressiveTarget serves a minimal specification and counts every request.
+func aggressiveTarget(t *testing.T) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
+	var hits atomic.Int64
+	spec := `{"openapi":"3.0.3","info":{"title":"t","version":"1"},"paths":{"/api/a":{"get":{"security":[]}}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/openapi.json" {
+			_, _ = w.Write([]byte(spec))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+func writeAggressiveConfig(t *testing.T, dir, baseURL string, disposable bool, extra string) {
+	t.Helper()
+	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + baseURL + "\n"
+	if disposable {
+		cfg += "  disposable: true\n"
+	}
+	cfg += "assessment:\n  profile: aggressive\n" + extra
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func answerPrompt(t *testing.T, answer string, terminal bool) {
+	t.Helper()
+	prev := confirmationInput
+	confirmationInput = func() (io.Reader, bool) { return strings.NewReader(answer), terminal }
+	t.Cleanup(func() { confirmationInput = prev })
+}
+
+// Every way of not authorizing aggressive testing stops the run before a single
+// request reaches the target.
+func TestAggressiveProfileIsRefusedUnlessFullyAuthorized(t *testing.T) {
+	cases := []struct {
+		name       string
+		disposable bool
+		extra      string
+		args       []string
+		answer     string
+		terminal   bool
+		want       string
+	}{
+		{"not declared disposable, even with --yes", false, "", []string{"--yes"}, "", false, "target.disposable"},
+		{"no terminal and no --yes", true, "", nil, "", false, "--yes"},
+		{"wrong origin typed", true, "", nil, "http://127.0.0.1:1\n", true, "did not match"},
+		{"nothing typed", true, "", nil, "", true, "did not match"},
+		{"wildcard scope", true, "scope:\n  include:\n    - scheme: https\n      host: \"*.example.test\"\n",
+			[]string{"--yes"}, "", false, "exact origin"},
+		{"scheme left open", true, "scope:\n  include:\n    - host: api.example.test\n",
+			[]string{"--yes"}, "", false, "exact origin"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv, hits := aggressiveTarget(t)
+			dir := t.TempDir()
+			t.Chdir(dir)
+			writeAggressiveConfig(t, dir, srv.URL, c.disposable, c.extra)
+			answerPrompt(t, c.answer, c.terminal)
+
+			code, _, errOut := run(t, append([]string{"attack"}, c.args...)...)
+			if code != ExitUsage {
+				t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitUsage, errOut)
+			}
+			if !strings.Contains(errOut, c.want) {
+				t.Errorf("stderr does not explain the refusal (%q):\n%s", c.want, errOut)
+			}
+			if n := hits.Load(); n != 0 {
+				t.Errorf("the target received %d request(s) before aggressive testing was authorized", n)
+			}
+		})
+	}
+}
+
+// Typing the exact origin, or --yes without a terminal, authorizes the run.
+func TestAggressiveProfileRunsOnceConfirmed(t *testing.T) {
+	for _, mode := range []string{"typed", "--yes"} {
+		t.Run(mode, func(t *testing.T) {
+			srv, hits := aggressiveTarget(t)
+			dir := t.TempDir()
+			t.Chdir(dir)
+			writeAggressiveConfig(t, dir, srv.URL, true, "")
+			args := []string{"attack"}
+			if mode == "typed" {
+				answerPrompt(t, srv.URL+"\n", true)
+			} else {
+				answerPrompt(t, "", false)
+				args = append(args, "--yes")
+			}
+			_, _, errOut := run(t, args...)
+			if hits.Load() == 0 {
+				t.Fatalf("a confirmed aggressive run sent nothing\nstderr: %s", errOut)
+			}
+		})
 	}
 }

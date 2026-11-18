@@ -24,11 +24,21 @@ scope:
   allowPrivateAddresses: true
 
 assessment:
-  # discovery    — reconnaissance only
-  # verification — real techniques with controlled impact (default)
-  # intrusive    — may change or destroy data; requires authorizeIntrusive
-  profile: verification
-  authorizeIntrusive: false
+  # safe       — reconnaissance and read-only checks; nothing state-changing
+  # standard   — also state-changing requests, but only against the exact
+  #              fixtures registered below with disposable: true (default)
+  # aggressive — may change or destroy any in-scope data; requires
+  #              target.disposable: true and a confirmation naming the target
+  profile: standard
+
+  # Hard limits on the whole assessment. A small allowance above maxRequests is
+  # reserved for restoring fixtures; restoration is attempted, never guaranteed.
+  maxRequests: 1000
+  maxDurationMinutes: 30
+
+  # Operations that change state despite a read-only method (GET /logout is the
+  # usual one). They are treated as state-changing whatever their method.
+  # stateChangingOperations: ["GET /logout"]
 
   concurrency: 4
   requestsPerSecond: 10
@@ -105,11 +115,14 @@ resources:
   #   # operations: ["GET /api/orders/{orderId}"]
   #   # nonOwners: [bob]
   #
-  #   # Optional. Enables cross-owner write testing, which requires the
-  #   # intrusive profile and authorizeIntrusive. A write is confirmed only by
-  #   # re-reading as the owner: an HTTP success never confirms one. The changed
-  #   # fields are restored afterwards on a best-effort basis, and the report
-  #   # says whether that worked.
+  #   # Optional. Enables cross-owner write testing. Under the default standard
+  #   # profile it runs only when this exact record is declared disposable test
+  #   # data, and only the exact bound request, changing only these fields, is
+  #   # permitted. Otherwise it needs the aggressive profile. A write is confirmed
+  #   # only by re-reading as the owner: an HTTP success never confirms one. The
+  #   # changed fields are restored afterwards; restoration is attempted, not
+  #   # guaranteed, and the report says whether it worked.
+  #   # disposable: true
   #   # mutation:
   #   #   values:
   #   #     status: "sulayi-marker"
@@ -157,6 +170,11 @@ engines:
   # Engines are off by default and are never installed for you. An engine that
   # is missing, crashes or times out becomes a blocked ledger row saying what
   # was not assessed, never a clean result.
+  #
+  # Nuclei and ZAP are currently BLOCKED in every profile: they open their own
+  # network connections, which Sulayi cannot constrain to the authorized scope.
+  # Enabling them records a blocked row and a reduced-coverage notice; neither
+  # is started. Only the source scanner (sast), which reads local files, runs.
   {}
   #
   # sourceRoot: ../my-application   # for engines that read code
@@ -178,11 +196,9 @@ engines:
   # zap:
   #   enabled: true
   #   executable: /opt/zap/zap.sh
-  #   # Both modes need profile: intrusive and authorizeIntrusive: true, so ZAP
-  #   # never runs at the default profile. "active" runs the active scanner,
-  #   # which sends attack payloads. "passive" (default) is meant to spider and
-  #   # observe, but its passivity is unverified, so it is gated the same way.
-  #   # A passive run does not assess injection and does not claim to.
+  #   # "active" runs the active scanner, which sends attack payloads, and needs
+  #   # profile: aggressive. "passive" (default) is meant to spider and observe,
+  #   # but its passivity is unverified, so it is gated the same way.
   #   mode: passive
   #
   # sast:

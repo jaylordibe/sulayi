@@ -76,12 +76,16 @@ type fakeEngine struct {
 	envNames   []string
 	extraArgs  []string
 	detectFail string
+	// network makes the fake declare that it opens its own connections.
+	network bool
 }
 
 func (f *fakeEngine) Meta() Meta {
 	return Meta{
 		ID: "fake", Title: "Fake", Capabilities: f.caps,
 		Unlocks: "nothing", InstallHint: "it is a test fixture",
+		// The fake exercises the supervisor, which only an offline engine reaches.
+		Offline: !f.network,
 	}
 }
 
@@ -96,7 +100,7 @@ func (f *fakeEngine) RequiredProfile(Settings) model.Profile {
 	if f.profile != "" {
 		return f.profile
 	}
-	return model.ProfileVerification
+	return model.ProfileStandard
 }
 
 func (f *fakeEngine) Invocation(t Target, s Settings, w Workspace, a Availability) (Invocation, error) {
@@ -132,7 +136,7 @@ func runFake(t *testing.T, body string, mutate func(*fakeEngine, *Settings, *Tar
 	t.Helper()
 	e := &fakeEngine{bin: buildFake(t, "fake", fakePreamble+body+"\n}\n")}
 	s := Settings{Enabled: true, TimeoutSeconds: 20}
-	tgt := Target{BaseURL: "http://127.0.0.1:1", Profile: model.ProfileVerification}
+	tgt := Target{BaseURL: "http://127.0.0.1:1", Profile: model.ProfileStandard}
 	if mutate != nil {
 		mutate(e, &s, &tgt)
 	}
@@ -164,7 +168,7 @@ func TestEngineHappyPath(t *testing.T) {
 func TestMissingEngineIsBlockedNotClean(t *testing.T) {
 	e := &fakeEngine{detectFail: "executable not found on PATH"}
 	out := Run(context.Background(), e,
-		Target{Profile: model.ProfileVerification}, Settings{Enabled: true}, Options{})
+		Target{Profile: model.ProfileStandard}, Settings{Enabled: true}, Options{})
 
 	if out.Status != StatusBlocked {
 		t.Fatalf("status = %s, want blocked", out.Status)
@@ -258,7 +262,7 @@ func TestEngineEnvironmentIsBuiltFromNothing(t *testing.T) {
 
 	t.Run("nothing is inherited by default", func(t *testing.T) {
 		out := Run(context.Background(), &fakeEngine{bin: bin},
-			Target{Profile: model.ProfileVerification},
+			Target{Profile: model.ProfileStandard},
 			Settings{Enabled: true, TimeoutSeconds: 20}, Options{})
 		for _, leaked := range []string{
 			"SULAYI_ADMIN_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "PGPASSWORD",
@@ -274,7 +278,7 @@ func TestEngineEnvironmentIsBuiltFromNothing(t *testing.T) {
 
 	t.Run("an engine gets only what it declares", func(t *testing.T) {
 		out := Run(context.Background(), &fakeEngine{bin: bin, envNames: []string{"HOME"}},
-			Target{Profile: model.ProfileVerification},
+			Target{Profile: model.ProfileStandard},
 			Settings{Enabled: true, TimeoutSeconds: 20}, Options{})
 		if !strings.Contains(out.Stderr, "HOME") {
 			t.Errorf("a declared variable did not reach the engine: %q", out.Stderr)
@@ -286,7 +290,7 @@ func TestEngineEnvironmentIsBuiltFromNothing(t *testing.T) {
 
 	t.Run("identity credentials are refused even when configured", func(t *testing.T) {
 		out := Run(context.Background(), &fakeEngine{bin: bin},
-			Target{Profile: model.ProfileVerification},
+			Target{Profile: model.ProfileStandard},
 			Settings{Enabled: true, TimeoutSeconds: 20, PassEnv: []string{"SULAYI_ADMIN_TOKEN", "HOME"}},
 			Options{ForbiddenEnv: []string{"SULAYI_ADMIN_TOKEN"}})
 
@@ -457,8 +461,8 @@ func TestPartialResultsClaimNoCoverage(t *testing.T) {
 // An engine that attacks must not run under a reconnaissance profile.
 func TestProfileGateBlocksAggressiveEngines(t *testing.T) {
 	out := runFake(t, oneResult, func(e *fakeEngine, _ *Settings, tgt *Target) {
-		e.profile = model.ProfileIntrusive
-		tgt.Profile = model.ProfileDiscovery
+		e.profile = model.ProfileAggressive
+		tgt.Profile = model.ProfileSafe
 	})
 	if out.Status != StatusBlocked || out.Cause != model.CauseSafetyPolicy {
 		t.Fatalf("status/cause = %s/%s, want blocked/safety_policy", out.Status, out.Cause)
@@ -471,7 +475,7 @@ func TestProfileGateBlocksAggressiveEngines(t *testing.T) {
 // A disabled engine is skipped, and skipping is not a failure.
 func TestDisabledEngineIsSkipped(t *testing.T) {
 	e := &fakeEngine{}
-	out := Run(context.Background(), e, Target{Profile: model.ProfileVerification},
+	out := Run(context.Background(), e, Target{Profile: model.ProfileStandard},
 		Settings{Enabled: false}, Options{})
 	if out.Status != StatusSkipped {
 		t.Errorf("status = %s, want skipped", out.Status)
@@ -515,7 +519,7 @@ func TestWorkspaceIsRemoved(t *testing.T) {
 		seen = w.Dir
 		return Normalized{}, nil
 	}
-	out := Run(context.Background(), e, Target{Profile: model.ProfileVerification},
+	out := Run(context.Background(), e, Target{Profile: model.ProfileStandard},
 		Settings{Enabled: true, TimeoutSeconds: 20}, Options{})
 	if out.Status != StatusCompleted {
 		t.Fatalf("status = %s (%s)", out.Status, out.Detail)

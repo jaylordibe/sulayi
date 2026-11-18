@@ -1,16 +1,27 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
 
 // Execute runs the CLI and returns a process exit code.
 func Execute(args []string, stdout, stderr io.Writer) int {
+	return ExecuteContext(context.Background(), args, stdout, stderr)
+}
+
+// ExecuteContext runs the CLI under ctx. Cancelling ctx stops the assessment:
+// planned work that has not started is recorded as cancelled, child processes
+// are killed with their process groups, and a fixture already written to is
+// still restored on its own bounded context.
+func ExecuteContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	root := &cobra.Command{
 		Use:   "sulayi",
 		Short: "Assessment coverage and verification",
@@ -36,7 +47,7 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 	root.AddCommand(newDoctorCommand(stdout, stderr))
 	root.AddCommand(newVersionCommand(stdout))
 
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
 		var coded *exitError
 		// errors.As rather than a type assertion, so a wrapped exit code keeps
 		// its meaning instead of degrading to "invalid usage".
@@ -66,6 +77,30 @@ func fail(code int, format string, args ...any) error {
 }
 
 // Main is the entry point used by cmd/sulayi.
+//
+// The first interrupt or termination signal cancels the assessment rather than
+// killing the process, so that it can stop its child processes, account for
+// what it did not do and restore anything it changed. Default handling is then
+// restored, so a second signal ends the process at once for an operator who
+// does not want to wait.
 func Main() {
-	os.Exit(Execute(os.Args[1:], os.Stdout, os.Stderr))
+	ctx, cancel := context.WithCancel(context.Background())
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	finished := make(chan struct{})
+	go func() {
+		select {
+		case <-sigs:
+			signal.Reset(os.Interrupt, syscall.SIGTERM)
+			fmt.Fprintln(os.Stderr, "\nsulayi: stopping: finishing restoration of any changed fixture "+
+				"and writing the report. Interrupt again to exit immediately.")
+			cancel()
+		case <-finished:
+		}
+	}()
+	code := ExecuteContext(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	close(finished)
+	signal.Stop(sigs)
+	cancel()
+	os.Exit(code)
 }

@@ -9,13 +9,13 @@ func TestProfileGateFailsClosed(t *testing.T) {
 		effective, required Profile
 		want                bool
 	}{
-		{ProfileDiscovery, ProfileDiscovery, true},
-		{ProfileVerification, ProfileDiscovery, true},
-		{ProfileIntrusive, ProfileVerification, true},
-		{ProfileDiscovery, ProfileVerification, false},
-		{ProfileVerification, ProfileIntrusive, false},
-		{"bogus", ProfileDiscovery, false},
-		{ProfileIntrusive, "bogus", false},
+		{ProfileSafe, ProfileSafe, true},
+		{ProfileStandard, ProfileSafe, true},
+		{ProfileAggressive, ProfileStandard, true},
+		{ProfileSafe, ProfileStandard, false},
+		{ProfileStandard, ProfileAggressive, false},
+		{"bogus", ProfileSafe, false},
+		{ProfileAggressive, "bogus", false},
 		{"", "", false},
 	}
 	for _, c := range cases {
@@ -31,15 +31,15 @@ func TestProfileGateFailsClosed(t *testing.T) {
 
 // Impact must be a property of the operation, or a sweep would send
 // unauthenticated writes under a read-only profile.
-func TestUnsafeMethodsRequireIntrusive(t *testing.T) {
+func TestUnsafeMethodsRequireAggressive(t *testing.T) {
 	for _, m := range []string{"GET", "HEAD", "OPTIONS"} {
-		if got := RequiredProfileForMethod(m); got != ProfileVerification {
-			t.Errorf("%s requires %s, want verification", m, got)
+		if got := RequiredProfileForMethod(m); got != ProfileSafe {
+			t.Errorf("%s requires %s, want safe", m, got)
 		}
 	}
 	for _, m := range []string{"POST", "PUT", "PATCH", "DELETE", "post", "delete"} {
-		if got := RequiredProfileForMethod(m); got != ProfileIntrusive {
-			t.Errorf("%s requires %s, want intrusive", m, got)
+		if got := RequiredProfileForMethod(m); got != ProfileAggressive {
+			t.Errorf("%s requires %s, want aggressive", m, got)
 		}
 	}
 }

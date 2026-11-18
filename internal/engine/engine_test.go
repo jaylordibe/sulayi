@@ -51,7 +51,7 @@ func op(method, path string) model.Operation {
 
 func baseOptions(ops []model.Operation, checks []Check) Options {
 	return Options{
-		RunID: "test", Target: "http://localhost:3000", Profile: model.ProfileVerification,
+		RunID: "test", Target: "http://localhost:3000", Profile: model.ProfileStandard,
 		Surface:           Surface{SpecDerived: true, Operations: ops},
 		Checks:            checks,
 		Concurrency:       4,
@@ -98,9 +98,9 @@ func TestUnsafeMethodsAreBlockedBelowIntrusive(t *testing.T) {
 		t.Errorf("ledger = %s/%s, want blocked/safety_policy", e.Disposition, e.Cause)
 	}
 	if stub.ran.Load() != 0 {
-		t.Fatal("an unsafe operation was executed under the verification profile")
+		t.Fatal("an unsafe operation was executed under the standard profile")
 	}
-	if !strings.Contains(e.Detail, "intrusive") {
+	if !strings.Contains(e.Detail, "aggressive") {
 		t.Errorf("detail does not explain what would be required: %q", e.Detail)
 	}
 }
@@ -108,12 +108,12 @@ func TestUnsafeMethodsAreBlockedBelowIntrusive(t *testing.T) {
 func TestIntrusiveProfilePermitsUnsafeMethods(t *testing.T) {
 	stub := &stubCheck{id: "stub", applies: true, result: check.Result{Disposition: model.DispositionExecuted}}
 	opts := baseOptions([]model.Operation{op("DELETE", "/orders/1")}, []Check{stub})
-	opts.Profile = model.ProfileIntrusive
+	opts.Profile = model.ProfileAggressive
 	if _, err := Run(context.Background(), opts); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if stub.ran.Load() != 1 {
-		t.Fatal("the intrusive profile did not permit an unsafe method")
+		t.Fatal("the aggressive profile did not permit an unsafe method")
 	}
 }
 
@@ -284,7 +284,7 @@ func TestNilEvidenceSinkIsSafe(t *testing.T) {
 
 func TestInvalidProfileIsRejected(t *testing.T) {
 	opts := baseOptions([]model.Operation{op("GET", "/a")}, nil)
-	opts.Profile = "aggressive"
+	opts.Profile = "intrusive"
 	if _, err := Run(context.Background(), opts); err == nil {
 		t.Fatal("an invalid profile was accepted")
 	}

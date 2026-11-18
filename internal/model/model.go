@@ -80,23 +80,37 @@ type Source struct {
 type Profile string
 
 const (
-	// ProfileDiscovery permits low-risk reconnaissance only.
-	ProfileDiscovery Profile = "discovery"
-	// ProfileVerification permits real techniques with controlled impact. It is
-	// the default for authorized local and staging environments.
-	ProfileVerification Profile = "verification"
-	// ProfileIntrusive permits potentially state-changing or disruptive tests
-	// and requires explicit authorization.
-	ProfileIntrusive Profile = "intrusive"
+	// ProfileSafe permits reconnaissance and read-only checks: no request that
+	// is, or is configured as, state-changing.
+	ProfileSafe Profile = "safe"
+	// ProfileStandard additionally permits state-changing requests whose exact
+	// target is a fixture the operator registered as disposable. It is the
+	// default. Which requests qualify is decided by the HTTP client from the
+	// request itself, never by a check's own description of what it is sending.
+	ProfileStandard Profile = "standard"
+	// ProfileAggressive permits state-changing and disruptive tests against any
+	// in-scope target. It requires the target to be declared disposable and an
+	// explicit confirmation naming it.
+	ProfileAggressive Profile = "aggressive"
 )
+
+// LegacyProfiles maps the profile names used before Sulayi to their
+// replacements. They are recognised only to be refused with a migration
+// message: accepting them silently would change what a run is permitted to do
+// without the operator noticing.
+var LegacyProfiles = map[string]Profile{
+	"discovery":    ProfileSafe,
+	"verification": ProfileSafe,
+	"intrusive":    ProfileAggressive,
+}
 
 func (p Profile) rank() (int, bool) {
 	switch p {
-	case ProfileDiscovery:
+	case ProfileSafe:
 		return 1, true
-	case ProfileVerification:
+	case ProfileStandard:
 		return 2, true
-	case ProfileIntrusive:
+	case ProfileAggressive:
 		return 3, true
 	}
 	return 0, false
@@ -138,14 +152,14 @@ func IsSafeMethod(method string) bool {
 //
 // This is deliberately a property of the (check, operation) pair rather than of
 // the check alone. A check that iterates every operation in a specification
-// would otherwise send an unauthenticated DELETE under the discovery profile —
+// would otherwise send an unauthenticated DELETE under the safe profile —
 // and if the endpoint really is missing authentication, which is exactly what
 // is being hunted, it would destroy data while proving it.
 func RequiredProfileForMethod(method string) Profile {
 	if IsSafeMethod(method) {
-		return ProfileVerification
+		return ProfileSafe
 	}
-	return ProfileIntrusive
+	return ProfileAggressive
 }
 
 // GateProfile decides whether work requiring `required` may run under the
@@ -301,6 +315,40 @@ func (o Operation) MatchesID(candidate string) bool {
 		return candidate == OperationID(o.Method, abs)
 	}
 	return false
+}
+
+// PathMatchesTemplate reports whether a concrete path fits an OpenAPI path
+// template.
+//
+// A "{param}" placeholder matches exactly one non-empty segment. It does not
+// match across "/", because "/users/{id}" and "/users/42/orders" are different
+// operations and treating the second as the first would hide a real route.
+func PathMatchesTemplate(template, path string) bool {
+	t := strings.Split(strings.Trim(template, "/"), "/")
+	p := strings.Split(strings.Trim(path, "/"), "/")
+	if len(t) != len(p) {
+		return false
+	}
+	for i := range t {
+		seg := t[i]
+		if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
+			if p[i] == "" {
+				return false
+			}
+			continue
+		}
+		if seg != p[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// IsStateChanging reports whether exercising op can change state: its method
+// is not read-only, or the operator has named it as state-changing whatever
+// its method.
+func (o Operation) IsStateChanging(stateChangingIDs []string) bool {
+	return !IsSafeMethod(o.Method) || o.MatchesAnyID(stateChangingIDs)
 }
 
 // MatchesAnyID reports whether any operator-supplied identifier names this

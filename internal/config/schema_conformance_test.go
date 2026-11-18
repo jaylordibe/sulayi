@@ -189,8 +189,10 @@ scope:
       pathPrefix: /v2/
   allowPrivateAddresses: false
 assessment:
-  profile: verification
-  authorizeIntrusive: false
+  profile: safe
+  maxRequests: 500
+  maxDurationMinutes: 15
+  stateChangingOperations: ["GET /logout"]
   concurrency: 8
   requestsPerSecond: 25
   timeoutSeconds: 30
@@ -209,13 +211,13 @@ environment:
 output:
   dir: .sulayi
 `,
-	"authorized intrusive": `
+	"aggressive against a disposable target": `
 apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
+  disposable: true
 assessment:
-  profile: intrusive
-  authorizeIntrusive: true
+  profile: aggressive
 `,
 }
 
@@ -240,7 +242,7 @@ apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 assessment:
-  profile: aggressive
+  profile: intrusive
 `,
 	"concurrency out of range": `
 apiVersion: sulayi/v1alpha1

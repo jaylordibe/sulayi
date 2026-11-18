@@ -114,37 +114,11 @@ func Merge(ops []model.Operation, candidates []model.PathCandidate) Merged {
 func matchTemplates(templates []model.Operation, path string) []model.Operation {
 	var out []model.Operation
 	for _, op := range templates {
-		if templateMatches(op.AbsolutePath(), path) || templateMatches(op.PathTemplate, path) {
+		if model.PathMatchesTemplate(op.AbsolutePath(), path) || model.PathMatchesTemplate(op.PathTemplate, path) {
 			out = append(out, op)
 		}
 	}
 	return out
-}
-
-// templateMatches reports whether a concrete path fits an OpenAPI path template.
-//
-// A "{param}" placeholder matches exactly one non-empty segment. It does not
-// match across "/", because "/users/{id}" and "/users/42/orders" are different
-// operations and treating the second as the first would hide a real route.
-func templateMatches(template, path string) bool {
-	t := strings.Split(strings.Trim(template, "/"), "/")
-	p := strings.Split(strings.Trim(path, "/"), "/")
-	if len(t) != len(p) {
-		return false
-	}
-	for i := range t {
-		seg := t[i]
-		if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
-			if p[i] == "" {
-				return false
-			}
-			continue
-		}
-		if seg != p[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // CoverageRows renders discovered surface as ledger entries.

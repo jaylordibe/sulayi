@@ -99,7 +99,7 @@ func mode(s scanner.Settings) Mode {
 // verification for passive mode requires driving ZAP through a plan that
 // provably contains no active-scan job.
 func (Engine) RequiredProfile(scanner.Settings) model.Profile {
-	return model.ProfileIntrusive
+	return model.ProfileAggressive
 }
 
 // Detect resolves the executable and asks it for its version.
@@ -416,7 +416,7 @@ func (Engine) Normalize(
 // assessed" are different claims, and a passive run only supports the first.
 const PassiveOnlyLimitation = "ZAP ran in passive mode, so its active scanner did not run and " +
 	"injection and cross-site scripting were NOT assessed by it. Set engines.zap.mode to active, " +
-	"under the intrusive profile, to test those"
+	"under the aggressive profile, to test those"
 
 func detail(name, desc string) string {
 	d := "ZAP reported " + name

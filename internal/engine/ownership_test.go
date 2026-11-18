@@ -238,7 +238,7 @@ func ownershipEngineOptions(t *testing.T, rc ResourceCheck, f resource.Fixture) 
 	}, "http://target.test", nil, redact.New())
 
 	return Options{
-		RunID: "stub", Target: "http://target.test", Profile: model.ProfileVerification,
+		RunID: "stub", Target: "http://target.test", Profile: model.ProfileStandard,
 		Surface: Surface{SpecDerived: true, Operations: []model.Operation{{
 			ID: "GET /api/orders/{orderId}", Method: "GET", PathTemplate: "/api/orders/{orderId}",
 			BaseURL:    "http://target.test",
@@ -337,13 +337,18 @@ func TestOwnershipToolFailureBecomesRunState(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 	var found bool
-	for _, f := range res.ToolFailures {
+	for _, f := range res.CleanupIncomplete {
 		if strings.Contains(f, "could not be restored") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("a failed restoration did not reach ToolFailures: %v", res.ToolFailures)
+		t.Fatalf("a failed restoration did not reach CleanupIncomplete: %v", res.CleanupIncomplete)
+	}
+	for _, f := range res.ToolFailures {
+		if strings.Contains(f, "could not be restored") {
+			t.Errorf("a failed restoration was reported as a coverage failure: %q", f)
+		}
 	}
 }
 

@@ -86,7 +86,7 @@ func TestRegistryRuleSourcesAreRefused(t *testing.T) {
 		"p/default", "r/go", "auto", "https://example.test/rules.yaml", // sulayi:refuses-registry
 	} {
 		_, err := Engine{}.Invocation(
-			scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileVerification},
+			scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileStandard},
 			scanner.Settings{Enabled: true, RuleSource: rules},
 			scanner.Workspace{}, scanner.Availability{Present: true, Path: "/bin/semgrep"})
 		if err == nil {
@@ -102,7 +102,7 @@ func TestRegistryRuleSourcesAreRefused(t *testing.T) {
 // No rules at all is refused rather than defaulting to a registry.
 func TestNoRulesIsRefused(t *testing.T) {
 	_, err := Engine{}.Invocation(
-		scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileVerification},
+		scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true}, scanner.Workspace{},
 		scanner.Availability{Present: true, Path: "/bin/semgrep"})
 	if err == nil {
@@ -120,7 +120,7 @@ func TestInvocationDisablesTelemetryAndNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	inv, err := Engine{}.Invocation(
-		scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileVerification},
+		scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true, RuleSource: rules},
 		scanner.Workspace{Dir: t.TempDir(), OutputPath: filepath.Join(t.TempDir(), "o.json")},
 		scanner.Availability{Present: true, Path: "/usr/local/bin/opengrep", Version: "1.0.0"})
@@ -147,7 +147,7 @@ func TestInvocationDisablesTelemetryAndNetwork(t *testing.T) {
 
 	// Semgrep does have telemetry, and it stays off.
 	sg, err := Engine{}.Invocation(
-		scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileVerification},
+		scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true, RuleSource: rules},
 		scanner.Workspace{Dir: t.TempDir(), OutputPath: filepath.Join(t.TempDir(), "o.json")},
 		scanner.Availability{Present: true, Path: "/usr/local/bin/semgrep", Version: "1.0.0"})
@@ -199,13 +199,13 @@ func mentions(all []string, substr string) bool {
 // nothing: it reads a local checkout and never opens a socket. Requiring
 // verification made the safest engine unavailable at the safest profile.
 func TestSourceAnalysisRunsAtTheLowestProfile(t *testing.T) {
-	if got := (Engine{}).RequiredProfile(scanner.Settings{}); got != model.ProfileDiscovery {
+	if got := (Engine{}).RequiredProfile(scanner.Settings{}); got != model.ProfileSafe {
 		t.Errorf("required profile = %s, want discovery: this engine makes no request to the "+
 			"target, so no profile above the lowest can be justified", got)
 	}
 	// And it must be permitted at every higher profile too.
 	for _, p := range []model.Profile{
-		model.ProfileDiscovery, model.ProfileVerification, model.ProfileIntrusive,
+		model.ProfileSafe, model.ProfileStandard, model.ProfileAggressive,
 	} {
 		if !p.Permits(Engine{}.RequiredProfile(scanner.Settings{})) {
 			t.Errorf("profile %s does not permit source analysis", p)
@@ -226,7 +226,7 @@ func TestOpengrepAndSemgrepGetDifferentArgumentVectors(t *testing.T) {
 	src := t.TempDir()
 	w := scanner.Workspace{Dir: t.TempDir(), OutputPath: filepath.Join(t.TempDir(), "r.json")}
 	settings := scanner.Settings{Enabled: true, RuleSource: dir}
-	target := scanner.Target{SourceRoot: src, Profile: model.ProfileVerification}
+	target := scanner.Target{SourceRoot: src, Profile: model.ProfileStandard}
 
 	// Flags verified absent from the installed opengrep's own `scan --help`.
 	absentFromOpengrep := []string{
@@ -275,7 +275,7 @@ func TestRuleIdsAreNotRewrittenToIncludeLocalPaths(t *testing.T) {
 	}
 	for _, path := range []string{"/usr/local/bin/opengrep", "/usr/local/bin/semgrep"} {
 		inv, err := Engine{}.Invocation(
-			scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileVerification},
+			scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileStandard},
 			scanner.Settings{Enabled: true, RuleSource: dir},
 			scanner.Workspace{Dir: t.TempDir(), OutputPath: filepath.Join(t.TempDir(), "o.json")},
 			scanner.Availability{Present: true, Path: path, Version: "1"})

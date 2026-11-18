@@ -3,7 +3,9 @@ package check
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/jaylordibe/sulayi/internal/httpx"
 	"github.com/jaylordibe/sulayi/internal/model"
 	"github.com/jaylordibe/sulayi/internal/outcome"
 	"github.com/jaylordibe/sulayi/internal/resource"
@@ -22,6 +24,12 @@ import (
 // So the sequence is: read as the owner, write as the non-owner, read as the
 // owner again, and compare the two owner-side reads. Only a change visible to
 // the owner proves the write landed.
+
+// CleanupTimeout bounds everything after a cross-owner write may have reached
+// the target: reading the owner's view, restoring the fixture and verifying the
+// restoration. It runs even after the assessment is cancelled, so it must be
+// short.
+const CleanupTimeout = 30 * time.Second
 
 // runMutation performs the read-write-read sequence.
 func (c CrossOwner) runMutation(ctx context.Context, p ResourcePlan) Result {
@@ -69,7 +77,7 @@ func (c CrossOwner) runMutation(ctx context.Context, p ResourcePlan) Result {
 	}
 
 	// Step 2: the unauthorized write.
-	attackerEx, err := p.Attacker.DoWithBody(ctx, p.Operation.Method, p.URL, map[string][]string{
+	attackerEx, writeErr := p.Attacker.DoWithBody(ctx, p.Operation.Method, p.URL, map[string][]string{
 		"Accept":        {"application/json, */*"},
 		"Content-Type":  {"application/json"},
 		"Cache-Control": {"no-cache"},
@@ -78,30 +86,62 @@ func (c CrossOwner) runMutation(ctx context.Context, p ResourcePlan) Result {
 		exchanges = append(exchanges, attackerEx)
 	}
 	uses = append(uses, ControlUse{IdentityID: p.Attacker.ID(), At: c.now()})
-	if err != nil || attackerEx.Response == nil {
-		return block(transportCause(err), "the cross-owner write could not be completed: "+summarize(err))
+	if writeErr != nil && httpx.NotSent(writeErr) {
+		// Refused, out of scope, over budget or cancelled before it left: the
+		// target never saw it, so there is nothing to observe or put back.
+		return block(transportCause(writeErr), "the cross-owner write was not sent: "+summarize(writeErr))
 	}
-	writeCls := outcome.Classify(attackerEx.Response, c.Signals)
+
+	// From here the write may have reached the target, so everything that
+	// observes or reverses it runs on its own context. Cancelling the
+	// assessment, or reaching its deadline, must not be what stops a fixture
+	// being put back: that would make stopping a run the way data gets left
+	// modified. The phase is still bounded, in time here and in requests by the
+	// client's cleanup allowance.
+	post, cancel := context.WithTimeout(httpx.Cleanup(context.WithoutCancel(ctx)), CleanupTimeout)
+	defer cancel()
+
+	// A cleanup that cannot be completed or verified is reported as such, never
+	// as a clean run.
+	unknown := func(cause model.BlockedCause, detail string) Result {
+		r := block(cause, detail)
+		r.ToolFailure = fmt.Sprintf("fixture %q may have been modified by the cross-owner write check "+
+			"and was not restored: %s", p.Fixture.ID, detail)
+		return r
+	}
 
 	// Step 3: the owner's view after the write.
-	afterEx, err := p.Owner.Do(ctx, p.ReadOperation.Method, p.ReadURL, probeHeaders())
+	afterEx, err := p.Owner.Do(post, p.ReadOperation.Method, p.ReadURL, probeHeaders())
 	if afterEx.Request.URL != "" {
 		exchanges = append(exchanges, afterEx)
 	}
 	uses = append(uses, ControlUse{IdentityID: p.Owner.ID(), At: c.now()})
 	if err != nil || afterEx.Response == nil {
-		return block(transportCause(err), "the owner's after-state could not be read, so it is not "+
-			"known whether the write landed. The resource may have been modified: "+summarize(err))
+		return unknown(transportCause(err), "the owner's after-state could not be read, so it is not "+
+			"known whether the write landed: "+summarize(err))
 	}
 	if cls := outcome.Classify(afterEx.Response, c.Signals); cls.Outcome != model.OutcomeAllowed {
-		return block(model.CauseIndeterminateOutcome, fmt.Sprintf(
+		return unknown(model.CauseIndeterminateOutcome, fmt.Sprintf(
 			"the owner could read fixture %q before the write and not after (%s). Something changed, "+
 				"but it cannot be established that the non-owner's write caused it — the resource may "+
 				"equally have been removed by the application or by another actor",
 			p.Fixture.ID, cls.Reason))
 	}
-
 	applied := mutationApplied(beforeEx.Response, afterEx.Response, p.Fixture.Mutation.Values)
+
+	// The write's own response may have been lost while the request still
+	// reached the target. The owner's view decides whether it landed — a
+	// status never confirms a write — but a write that did not complete and
+	// changed nothing proves nothing about the boundary either way.
+	if writeErr != nil || attackerEx.Response == nil {
+		if !applied.Changed {
+			return block(transportCause(writeErr), "the cross-owner write did not complete and the "+
+				"owner's view is unchanged, so there was nothing to restore and nothing was "+
+				"established about the boundary: "+summarize(writeErr))
+		}
+		attackerEx.Response = &model.CapturedResponse{}
+	}
+	writeCls := outcome.Classify(attackerEx.Response, c.Signals)
 
 	if !applied.Changed {
 		// The write did not land. If it nevertheless returned success, that is
@@ -122,7 +162,7 @@ func (c CrossOwner) runMutation(ctx context.Context, p ResourcePlan) Result {
 
 	// The owner's view changed. Restore it if we can, and say what happened
 	// either way.
-	restore := c.restore(ctx, p, applied, &exchanges, &uses)
+	restore := c.restore(post, p, applied, &exchanges, &uses)
 
 	if p.Fixture.CrossOwnerAccess == resource.CrossOwnerAllowed {
 		return Result{

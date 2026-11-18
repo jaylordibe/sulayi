@@ -87,7 +87,7 @@ func TestPassiveModeClaimsNoActiveCoverage(t *testing.T) {
 func TestProfileGatingIsIntrusiveInEveryMode(t *testing.T) {
 	for _, m := range []string{"", "passive", "active", "PASSIVE"} {
 		s := scanner.Settings{Extra: map[string]string{"mode": m}}
-		if got := (Engine{}).RequiredProfile(s); got != model.ProfileIntrusive {
+		if got := (Engine{}).RequiredProfile(s); got != model.ProfileAggressive {
 			t.Errorf("mode %q required profile = %s, want intrusive", m, got)
 		}
 	}
@@ -98,7 +98,7 @@ func TestProfileGatingIsIntrusiveInEveryMode(t *testing.T) {
 func TestInvocationIsolatesZAPState(t *testing.T) {
 	w := scanner.Workspace{Dir: t.TempDir(), OutputPath: filepath.Join(t.TempDir(), "r.json")}
 	inv, err := Engine{}.Invocation(
-		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true}, w,
 		scanner.Availability{Present: true, Path: "/opt/zap/zap.sh", Version: "2.15.0"})
 	if err != nil {
@@ -241,7 +241,7 @@ func TestTheVersionProbeGetsTheEnvironmentTheLauncherNeeds(t *testing.T) {
 	// And the scan uses the same list, so detection and execution cannot drift.
 	dir := t.TempDir()
 	inv, err := Engine{}.Invocation(
-		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileStandard},
 		scanner.Settings{Enabled: true},
 		scanner.Workspace{Dir: dir, OutputPath: filepath.Join(dir, "z.json")},
 		scanner.Availability{Present: true, Path: "/opt/zap/zap.sh", Version: "2.17.0"})

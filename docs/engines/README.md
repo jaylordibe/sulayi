@@ -4,6 +4,19 @@ Sulayi can orchestrate Nuclei, ZAP and a source analyser (opengrep or
 Semgrep). It does not reimplement what they do, and it does not believe what they
 say.
 
+> **Current status: Nuclei and ZAP are blocked in every profile.** They open their own
+> network connections, which Sulayi's scope enforcement — URL gate, dial-time address
+> checks, redirect policy, request budget, request log — cannot see. They are refused
+> before the binary is probed or started, recorded as a blocked ledger row with the
+> reason, and the terminal reports **COVERAGE REDUCED**. The integrations below are kept,
+> and the manual integration job still checks their argument vectors against real
+> binaries, so they can run again once a verified outbound-destination control exists
+> ([ADR-0019](../adr/0019-safety-enforced-at-the-http-client.md)). The source analyser
+> reads local files and is unaffected.
+>
+> Not yet evaluated: whether ZAP can passively analyse traffic Sulayi has already
+> captured without making connections of its own. That needs a real ZAP to establish.
+
 ## What Sulayi does and does not do
 
 | It does | It does not |
@@ -176,14 +189,14 @@ Run one-shot (`zap.sh -cmd`), not as a daemon, with a private home inside the
 run's workspace so a scan cannot accumulate state in your home directory.
 
 - **`passive`** (default) is meant to spider and report what passive rules observe.
-  It **also requires the `intrusive` profile and `authorizeIntrusive`**, so ZAP never
-  runs at the default profile. Its passivity rests on `-quickprogress`, which ZAP's
+  It **also requires the `aggressive` profile**, so ZAP never runs at the default
+  profile. Its passivity rests on `-quickprogress`, which ZAP's
   [Quick Start command-line documentation](https://www.zaproxy.org/docs/desktop/addons/quick-start/cmdline/)
   describes only as showing progress bars, and no `-quick*` option disables the
   active scanner. Until a run against a real ZAP shows that no active-scan job
   executes, passive mode is gated as if it were active.
 - **`active`** additionally runs ZAP's active scanner, which sends attack
-  payloads. It requires the `intrusive` profile and `authorizeIntrusive`.
+  payloads. It requires the `aggressive` profile.
 
 A passive run **does not assess injection or cross-site scripting** and does not
 claim to: those classes stay in `classesNotAssessed`, because passive rules

@@ -60,6 +60,10 @@ func (Engine) Meta() scanner.Meta {
 	return scanner.Meta{
 		ID:    "sast",
 		Title: "Semgrep/opengrep",
+		// It reads the operator's source tree and local rule files and never
+		// contacts the target. Semgrep's own version check and metrics are
+		// switched off by its argument vector; opengrep has neither.
+		Offline: true,
 		Capabilities: []scanner.Capability{
 			"source analysis (bring your own rules; registry rules are not redistributable)",
 		},
@@ -91,7 +95,7 @@ func (Engine) Meta() scanner.Meta {
 // executes a third-party binary over their source. That is governed by the fact
 // that nothing runs unless it is explicitly enabled and its executable
 // configured, which is the same gate every engine has.
-func (Engine) RequiredProfile(scanner.Settings) model.Profile { return model.ProfileDiscovery }
+func (Engine) RequiredProfile(scanner.Settings) model.Profile { return model.ProfileSafe }
 
 // Detect resolves the executable and asks it for its version.
 func (Engine) Detect(ctx context.Context, s scanner.Settings) scanner.Availability {

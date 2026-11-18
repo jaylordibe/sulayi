@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/proc"
 	"github.com/jaylordibe/sulayi/internal/scanner"
 	"github.com/jaylordibe/sulayi/internal/scanner/nuclei"
 	"github.com/jaylordibe/sulayi/internal/scanner/sast"
@@ -94,9 +95,18 @@ func TestNucleiFindsAPlantedMarker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	out := scanner.Run(ctx, nuclei.New(),
-		scanner.Target{BaseURL: srv.URL, Profile: model.ProfileVerification},
-		settings, scanner.Options{RunID: "integration"})
+	target := scanner.Target{BaseURL: srv.URL, Profile: model.ProfileStandard}
+
+	// Through the product, Nuclei is refused before it starts: Sulayi cannot
+	// constrain its outbound destinations (see scanner.NetworkBlockedDetail).
+	if blocked := scanner.Run(ctx, nuclei.New(), target, settings, scanner.Options{RunID: "integration"}); blocked.Status != scanner.StatusBlocked {
+		t.Fatalf("Nuclei ran through scanner.Run with status %s; it must be blocked", blocked.Status)
+	}
+
+	// The integration itself is kept working for when a verified egress control
+	// exists, so its argument vector and parser are driven here directly, under
+	// the same supervisor, against a loopback server this test owns.
+	out := superviseDirectly(ctx, t, nuclei.New(), target, settings)
 
 	if out.Status != scanner.StatusCompleted {
 		t.Fatalf("status = %s (%s: %s)\nstderr: %s",
@@ -149,7 +159,7 @@ func TestSASTFindsAPlantedMarker(t *testing.T) {
 	defer cancel()
 
 	out := scanner.Run(ctx, sast.New(),
-		scanner.Target{SourceRoot: src, Profile: model.ProfileDiscovery},
+		scanner.Target{SourceRoot: src, Profile: model.ProfileSafe},
 		settings, scanner.Options{RunID: "integration"})
 
 	if out.Status != scanner.StatusCompleted {
@@ -185,7 +195,7 @@ func TestZAPIsDetectedAndInvokedIntoItsOwnHome(t *testing.T) {
 
 	w := scanner.Workspace{Dir: t.TempDir(), OutputPath: filepath.Join(t.TempDir(), "zap.json")}
 	inv, err := zap.New().Invocation(
-		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileVerification},
+		scanner.Target{BaseURL: "http://127.0.0.1:8080", Profile: model.ProfileStandard},
 		settings, w, a)
 	if err != nil {
 		t.Fatalf("invocation: %v", err)
@@ -202,6 +212,35 @@ func TestZAPIsDetectedAndInvokedIntoItsOwnHome(t *testing.T) {
 // severity it attached. This is asserted against the real engines as well as
 // the fakes, because it is the property most likely to be eroded by a
 // well-meaning change to a normalizer.
+// superviseDirectly runs an engine's own invocation under the shared process
+// supervisor and normalises its output, without the product's gates. It exists
+// only so a real binary can be checked against this integration's argument
+// vector and parser while the product refuses to run that engine.
+func superviseDirectly(ctx context.Context, t *testing.T, e scanner.Engine, target scanner.Target, s scanner.Settings) scanner.Outcome {
+	t.Helper()
+	avail := e.Detect(ctx, s)
+	w := scanner.Workspace{Dir: t.TempDir(), OutputPath: filepath.Join(t.TempDir(), "out")}
+	inv, err := e.Invocation(target, s, w, avail)
+	if err != nil {
+		t.Fatalf("invocation: %v", err)
+	}
+	spec := inv.Spec
+	spec.Env = proc.MinimalEnv(inv.EnvNames, nil)
+	spec.Timeout = s.Timeout()
+	spec.MaxStdout = scanner.MaxStdout
+	spec.MaxStderr = scanner.MaxStderr
+	spec.Dir = w.Dir
+	res, runErr := proc.Run(ctx, spec)
+	norm, err := e.Normalize(res.Stdout, w, inv.Provenance, s)
+	if err != nil {
+		t.Fatalf("output could not be read (run error %v): %v\nstderr: %s", runErr, err, res.Stderr)
+	}
+	return scanner.Outcome{
+		Engine: e.Meta().ID, Status: scanner.StatusCompleted, Observations: norm.Observations,
+		Provenance: inv.Provenance, Stderr: res.Stderr,
+	}
+}
+
 func assertOnlyObserved(t *testing.T, out scanner.Outcome) {
 	t.Helper()
 	for _, o := range out.Observations {

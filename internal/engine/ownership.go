@@ -92,7 +92,7 @@ func planOwnership(opts Options, lg *ledger) []ownershipUnit {
 	// the operation that observes its effect.
 	readByPath := map[string]model.Operation{}
 	for _, op := range opts.Surface.Operations {
-		if model.IsSafeMethod(op.Method) && op.Method != "OPTIONS" {
+		if !op.IsStateChanging(opts.StateChangingOperations) && op.Method != "OPTIONS" {
 			if _, seen := readByPath[op.PathTemplate]; !seen {
 				readByPath[op.PathTemplate] = op
 			}
@@ -151,6 +151,7 @@ func planOwnership(opts Options, lg *ledger) []ownershipUnit {
 			addressable++
 
 			mutating := !model.IsSafeMethod(op.Method)
+			stateChanging := op.IsStateChanging(opts.StateChangingOperations)
 			for _, attacker := range attackers {
 				plan := check.ResourcePlan{
 					Operation: op, Fixture: f, URL: binding.URL,
@@ -193,12 +194,11 @@ func planOwnership(opts Options, lg *ledger) []ownershipUnit {
 					continue
 				}
 
-				required := model.RequiredProfileForMethod(op.Method)
+				required, why := ownershipRequiredProfile(op, f, mutating, stateChanging)
 				if allowed, cause := model.GateProfile(opts.Profile, required); !allowed {
 					lg.add(planRow(plan, opts.ResourceCheck, model.DispositionBlocked, cause,
-						fmt.Sprintf("a cross-owner %s against somebody's real resource requires the %s "+
-							"profile; the effective profile is %s. It was not attempted",
-							op.Method, required, opts.Profile)))
+						fmt.Sprintf("%s requires the %s profile; the effective profile is %s. "+
+							"It was not attempted", why, required, opts.Profile)))
 					continue
 				}
 
@@ -210,6 +210,25 @@ func planOwnership(opts Options, lg *ledger) []ownershipUnit {
 							"expanding. Narrow resources[].operations or resources[].nonOwners",
 							MaxOwnershipUnits)))
 					continue
+				}
+				// Below aggressive, the HTTP client refuses every state-changing
+				// request it was not told about. Register exactly this one: the
+				// method, the bound URL, and the fields the fixture may change.
+				// The owner's restoring write is the same request with a subset
+				// of those fields, so it needs no grant of its own.
+				if stateChanging && opts.Profile == model.ProfileStandard {
+					if opts.Guard == nil {
+						lg.add(planRow(plan, opts.ResourceCheck, model.DispositionBlocked,
+							model.CauseSafetyPolicy, "no safety guard is configured to register this "+
+								"disposable fixture request, so it would be refused"))
+						continue
+					}
+					if err := opts.Guard.Grant(op.Method, plan.URL, mutationFields(f)); err != nil {
+						lg.add(planRow(plan, opts.ResourceCheck, model.DispositionBlocked,
+							model.CauseSafetyPolicy, "the request could not be registered as a "+
+								"disposable fixture request: "+err.Error()))
+						continue
+					}
 				}
 				units = append(units, ownershipUnit{plan: plan, rc: opts.ResourceCheck})
 			}
@@ -230,6 +249,41 @@ func planOwnership(opts Options, lg *ledger) []ownershipUnit {
 }
 
 // planRow renders a ledger row for a unit that will not run.
+// ownershipRequiredProfile decides the profile a cross-owner unit needs, and
+// says why in words a ledger reader can act on.
+//
+// A request that cannot change state needs only safe. A write needs standard
+// only when its fixture is registered as disposable: that is the one case where
+// the operator has said this exact record may be changed. Everything else that
+// changes state — a write to a fixture not declared disposable, or a read-only
+// method the operator has named as state-changing — needs aggressive.
+func ownershipRequiredProfile(op model.Operation, f resource.Fixture, mutating, stateChanging bool) (model.Profile, string) {
+	switch {
+	case !stateChanging:
+		return model.ProfileSafe, "this read"
+	case mutating && f.Disposable && op.Method != "DELETE":
+		return model.ProfileStandard, fmt.Sprintf("a cross-owner %s against disposable fixture %q", op.Method, f.ID)
+	case mutating:
+		return model.ProfileAggressive, fmt.Sprintf("a cross-owner %s against fixture %q, which is not "+
+			"declared disposable (resources[].disposable),", op.Method, f.ID)
+	default:
+		return model.ProfileAggressive, "an operation configured in assessment.stateChangingOperations"
+	}
+}
+
+// mutationFields lists the body fields a fixture is configured to change.
+func mutationFields(f resource.Fixture) []string {
+	if f.Mutation == nil {
+		return nil
+	}
+	fields := make([]string, 0, len(f.Mutation.Values))
+	for k := range f.Mutation.Values {
+		fields = append(fields, k)
+	}
+	sort.Strings(fields)
+	return fields
+}
+
 func planRow(p check.ResourcePlan, rc ResourceCheck, d model.Disposition, cause model.BlockedCause, detail string) model.CoverageEntry {
 	return model.CoverageEntry{
 		Dimension:       DimensionOwnership,

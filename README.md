@@ -144,6 +144,13 @@ engines:
     templates: ./nuclei-templates    # required; nothing is downloaded
 ```
 
+> **Nuclei and ZAP are currently blocked in every profile.** They open their own network
+> connections, which Sulayi's scope enforcement cannot constrain, and a security tool that
+> bypasses the boundary it works within is not acceptable. Enabling them records a blocked
+> ledger row and a **COVERAGE REDUCED** notice; neither is started. This lasts until a
+> verified outbound-destination control exists. The source scanner, which reads local
+> files, is unaffected.
+
 Sulayi does not reimplement Nuclei's templates, ZAP's active scanner or
 Semgrep's dataflow analysis. It supervises them: explicit argument vectors and never a
 shell, an environment built from nothing so your bearer tokens cannot reach a third-party
@@ -161,7 +168,7 @@ therefore still unassessed. An engine that did not complete assesses nothing, an
 ZAP scan does not claim the injection classes its active scanner would have tested.
 
 `sulayi doctor` reports which engines are installed, what each would unlock, and changes
-nothing on your machine.
+nothing on your machine. It reports Nuclei and ZAP as blocked without executing them.
 
 ### Framework adapters
 
@@ -260,7 +267,7 @@ broken access control.
 ```
 Sulayi assessment 20260905T154341Z-7a55b019
   target:   http://127.0.0.1:8731
-  profile:  verification
+  profile:  standard
   surface:  6 operations from openapi-url
   oracle:   usable (declared)
 
@@ -279,7 +286,7 @@ The ledger is the deliverable:
 | untested | `GET /api/health` | `no_oracle` | declared public; success is expected |
 | untested | `GET /api/orders/{id}` | `missing_resource` | requires a path parameter; probing with an invented id would test nothing |
 | untested | `POST /api/auth/login` | `safety_policy` | authentication route; sweeping it can lock real accounts |
-| blocked | `POST /api/orders` | `safety_policy` | `POST` needs the `intrusive` profile |
+| blocked | `POST /api/orders` | `safety_policy` | `POST` to a fixture not declared disposable needs the `aggressive` profile |
 
 That fourth row is the one that matters. If `GET /api/orders/{id}` returns 404 because the
 database is empty, the endpoint was **not** meaningfully security-tested — and most tools
@@ -388,12 +395,25 @@ Profiles are strictly ordered and never escalate implicitly:
 
 | profile | permits |
 |---|---|
-| `discovery` | reconnaissance only |
-| `verification` | real techniques, safe HTTP methods (**default**) |
-| `intrusive` | may change or destroy data; requires `authorizeIntrusive: true` |
+| `safe` | reconnaissance and read-only checks; nothing state-changing |
+| `standard` (**default**) | also state-changing requests, but only the exact requests bound from fixtures you declared `disposable`, changing only their configured fields, never `DELETE` |
+| `aggressive` | state-changing and destructive tests against any in-scope target; requires `target.disposable: true`, typing the target's origin to confirm (or `--yes` with no terminal), and exact-origin scope entries |
 
-Impact is a property of the **operation**, not of the check: an unauthenticated `DELETE` is
-gated even though the check that would send it is read-only in principle.
+This is decided in the HTTP client every request passes through, from the request
+itself — never from a check's description of what it is sending. A read-only method is
+assumed not to change state unless you list it in `assessment.stateChangingOperations`
+(`GET /logout`). See [ADR-0019](docs/adr/0019-safety-enforced-at-the-http-client.md).
+
+**Limits.** `assessment.maxRequests` (default 1,000) and `assessment.maxDurationMinutes`
+(default 30). A run that hits either, or that you interrupt, still writes its report, says
+why it stopped, and exits 4. Restoring a fixture you changed runs on a small allowance
+above the request limit and outside the time limit, so stopping is never what leaves data
+modified; a restoration that fails or cannot be verified is reported as **CLEANUP
+INCOMPLETE**, naming the fixture. Restoration is attempted, never guaranteed.
+
+**Accountability.** Every request — sent, refused or failed — is a line in
+`requests.jsonl` in the run directory, redacted, with the identity that sent it. A
+credential is only ever sent to its identity's own target origin.
 
 Scope is an **allowlist**, enforced both on the URL before any DNS is emitted and on every
 resolved IP at dial time. Redirects are never followed automatically. Cloud metadata
@@ -503,6 +523,7 @@ authentication bypass — a silent pass is the worst possible default for a secu
 | [Discovery on real applications](docs/evaluation/discovery-on-reference-applications.md) | what M5 finds on the reference apps, and why that is mostly nothing |
 | [ADR-0017: the reposition](docs/adr/0017-reposition-to-coverage-and-verification.md) | why the ledger is the product and authorization is a contributor |
 | [ADR-0018: the rename to Sulayi](docs/adr/0018-product-identity-sulayi.md) | what was renamed, and why the old names are refused rather than aliased |
+| [ADR-0019: safety at the HTTP client](docs/adr/0019-safety-enforced-at-the-http-client.md) | the three profiles, what `standard` may change, and why Nuclei and ZAP are blocked |
 | [Releasing](docs/releases/README.md) | how a release is cut, and why no binaries are published |
 | [ADRs](docs/adr/) | consequential decisions and their alternatives |
 | [Roadmap](docs/roadmap.md) | what is next, and what is explicitly out |

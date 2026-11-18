@@ -95,6 +95,10 @@ type ownershipOptions struct {
 	aliceToken string
 	// canaryPath enables liveness canaries for both identities.
 	canaryPath string
+	// disposable declares the fixture disposable test data.
+	disposable bool
+	// ctx is the assessment's context; nil means context.Background.
+	ctx context.Context
 }
 
 // runOwnership assesses handler with alice owning theOrder and bob probing it.
@@ -128,8 +132,16 @@ func runOwnershipWithSpec(
 	if err != nil {
 		t.Fatalf("scope: %v", err)
 	}
+	profile := opt.profile
+	if profile == "" {
+		profile = model.ProfileStandard
+	}
+	guard, err := httpx.NewGuard(profile, nil)
+	if err != nil {
+		t.Fatalf("guard: %v", err)
+	}
 	red := redact.New()
-	client, err := httpx.New(httpx.Options{Policy: pol, Redactor: red, Timeout: 5 * time.Second})
+	client, err := httpx.New(httpx.Options{Policy: pol, Redactor: red, Timeout: 5 * time.Second, Guard: guard})
 	if err != nil {
 		t.Fatalf("httpx: %v", err)
 	}
@@ -171,15 +183,10 @@ func runOwnershipWithSpec(
 	fixture := resource.Fixture{
 		ID: "order-alice", Type: "order", Owner: "alice",
 		CrossOwnerAccess: expectation, Values: values,
-		Provenance: resource.ProvenanceConfigured,
+		Provenance: resource.ProvenanceConfigured, Disposable: opt.disposable,
 	}
 	if opt.mutation != nil {
 		fixture.Mutation = &resource.Mutation{Values: opt.mutation}
-	}
-
-	profile := opt.profile
-	if profile == "" {
-		profile = model.ProfileVerification
 	}
 
 	parsed, err := openapi.Parse([]byte(spec), srv.URL,
@@ -188,7 +195,11 @@ func runOwnershipWithSpec(
 		t.Fatalf("openapi: %v", err)
 	}
 
-	res, err := engine.Run(context.Background(), engine.Options{
+	ctx := opt.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	res, err := engine.Run(ctx, engine.Options{
 		RunID:   "eval-m2",
 		Target:  srv.URL,
 		Profile: profile,
@@ -201,6 +212,7 @@ func runOwnershipWithSpec(
 		ResourceCheck:     check.CrossOwner{Signals: signals},
 		Resources:         []resource.Fixture{fixture},
 		Identities:        ids,
+		Guard:             guard,
 		Concurrency:       2,
 		RequestsPerSecond: 500,
 	})
@@ -651,9 +663,10 @@ func TestM2_UnfillableFixtureIsNotAPass(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // A cross-owner write against somebody's real resource is state-changing, so it
-// requires the intrusive profile. Under verification it must be blocked, and the
-// ledger must say so.
-func TestM2_MutationRequiresTheIntrusiveProfile(t *testing.T) {
+// requires the aggressive profile unless the fixture is declared disposable. Under
+// standard, against a fixture that is not, it must be blocked and the ledger must
+// say so.
+func TestM2_MutationOfANonDisposableFixtureRequiresAggressive(t *testing.T) {
 	var writes atomic.Int64
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/orders/", func(w http.ResponseWriter, r *http.Request) {
@@ -672,7 +685,7 @@ func TestM2_MutationRequiresTheIntrusiveProfile(t *testing.T) {
 
 	res := runOwnership(t, mux, ownershipOptions{
 		mutation: map[string]any{"status": "sulayi-m2-marker"}, canaryPath: "/api/me",
-		// verification, not intrusive
+		// standard, and the fixture is not declared disposable
 	})
 
 	row := ownershipRow(t, res, writeOp)
@@ -680,7 +693,7 @@ func TestM2_MutationRequiresTheIntrusiveProfile(t *testing.T) {
 		t.Fatalf("write row = %s/%s, want blocked/safety_policy", row.Disposition, row.Cause)
 	}
 	if n := writes.Load(); n != 0 {
-		t.Fatalf("%d write requests were sent under the verification profile", n)
+		t.Fatalf("%d write requests were sent under the standard profile", n)
 	}
 }
 
@@ -825,7 +838,7 @@ func TestM2_IdentitiesDoNotContaminateEachOther(t *testing.T) {
 	}
 
 	res, err := engine.Run(context.Background(), engine.Options{
-		RunID: "eval-m2-race", Target: srv.URL, Profile: model.ProfileVerification,
+		RunID: "eval-m2-race", Target: srv.URL, Profile: model.ProfileStandard,
 		Surface:       engine.Surface{SpecDerived: true, Operations: parsed.Operations},
 		ResourceCheck: check.CrossOwner{},
 		Resources:     fixtures,
@@ -876,6 +889,12 @@ type orderStore struct {
 	// acceptAndDiscard makes writes return success while changing nothing.
 	acceptAndDiscard bool
 	writes           atomic.Int64
+	// onAttackerWrite runs when a non-owner's write arrives, after it is
+	// applied, to model the operator stopping the run at that moment.
+	onAttackerWrite func()
+	// refuseOwnerWrites makes the owner's own write fail, so a restoration
+	// cannot succeed.
+	refuseOwnerWrites bool
 }
 
 func (s *orderStore) handler() http.Handler {
@@ -896,6 +915,10 @@ func (s *orderStore) handler() http.Handler {
 			writeJSON(w, 200, body)
 		case http.MethodPatch:
 			s.writes.Add(1)
+			if s.refuseOwnerWrites && caller == "alice" {
+				writeJSON(w, 500, map[string]any{"message": "write rejected"})
+				return
+			}
 			if s.enforce && caller != "alice" {
 				writeJSON(w, 404, map[string]any{"message": "not found"})
 				return
@@ -908,6 +931,9 @@ func (s *orderStore) handler() http.Handler {
 					s.status = v
 					s.mu.Unlock()
 				}
+			}
+			if caller != "alice" && s.onAttackerWrite != nil {
+				s.onAttackerWrite()
 			}
 			s.mu.Lock()
 			body := map[string]any{
@@ -939,7 +965,7 @@ func (s *orderStore) current() string {
 func mutationOptions() ownershipOptions {
 	return ownershipOptions{
 		mutation:   map[string]any{"status": "sulayi-m2-marker"},
-		profile:    model.ProfileIntrusive,
+		profile:    model.ProfileAggressive,
 		canaryPath: "/api/me",
 	}
 }
@@ -975,6 +1001,75 @@ func TestM2_VulnerableMutation_IsConfirmedByOwnerSideObservation(t *testing.T) {
 	row := ownershipRow(t, res, writeOp)
 	if !strings.Contains(row.Detail, "restored") {
 		t.Errorf("the ledger does not report what happened to the resource: %q", row.Detail)
+	}
+}
+
+// Under the default standard profile, a fixture declared disposable is the one
+// thing a write may target. The full read-write-read cycle runs through the HTTP
+// client's guard — the attacker's write and the owner's restoration both — and
+// the result is the same confirmed finding the aggressive profile produces.
+func TestS0_StandardProfileWritesOnlyADisposableFixture(t *testing.T) {
+	store := &orderStore{status: "paid"}
+	opt := mutationOptions()
+	opt.profile = model.ProfileStandard
+	opt.disposable = true
+	res := runOwnership(t, store.handler(), opt)
+
+	var found *model.Finding
+	for i, f := range bolaFindings(res) {
+		if f.CheckID == check.CrossOwnerWriteID {
+			found = &bolaFindings(res)[i]
+		}
+	}
+	if found == nil || found.State != model.StateConfirmed {
+		t.Fatalf("no confirmed cross-owner write finding under standard; ledger: %+v",
+			ownershipRow(t, res, writeOp))
+	}
+	if got := store.current(); got != "paid" {
+		t.Errorf("the disposable fixture was left as %q; the owner's restoration was refused or failed", got)
+	}
+	if len(res.ToolFailures) != 0 {
+		t.Errorf("tool failures under standard: %v", res.ToolFailures)
+	}
+}
+
+// Stopping the run must not be how a fixture gets left modified. The assessment
+// is cancelled at the moment the non-owner's write lands; the owner's after-read,
+// the restoration and its verification still run, on their own bounded context.
+func TestS0_CancellationAfterTheWriteStillRestoresTheFixture(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := &orderStore{status: "paid", onAttackerWrite: cancel}
+	opt := mutationOptions()
+	opt.ctx = ctx
+	res := runOwnership(t, store.handler(), opt)
+
+	if ctx.Err() == nil {
+		t.Fatal("the assessment was never cancelled, so this proves nothing")
+	}
+	if got := store.current(); got != "paid" {
+		t.Errorf("the fixture was left as %q after cancellation", got)
+	}
+	if len(res.CleanupIncomplete) != 0 {
+		t.Errorf("cleanup reported incomplete although the fixture was restored: %v", res.CleanupIncomplete)
+	}
+	row := ownershipRow(t, res, writeOp)
+	if !strings.Contains(row.Detail, "restored") {
+		t.Errorf("the ledger does not say the fixture was restored: %q", row.Detail)
+	}
+}
+
+// A restoration that fails is reported as incomplete cleanup naming the
+// fixture, never folded into a clean result.
+func TestS0_FailedRestorationIsReportedAsIncompleteCleanup(t *testing.T) {
+	store := &orderStore{status: "paid", refuseOwnerWrites: true}
+	res := runOwnership(t, store.handler(), mutationOptions())
+
+	if got := store.current(); got == "paid" {
+		t.Fatal("the write did not land, so this proves nothing")
+	}
+	if len(res.CleanupIncomplete) != 1 || !strings.Contains(res.CleanupIncomplete[0], "order-alice") {
+		t.Fatalf("cleanupIncomplete = %v, want the modified fixture named", res.CleanupIncomplete)
 	}
 }
 
@@ -1109,7 +1204,7 @@ func TestM2_FixtureMakesAParameterisedOperationTestable(t *testing.T) {
 
 	run := func(fixtures []resource.Fixture) engine.Result {
 		res, rerr := engine.Run(context.Background(), engine.Options{
-			RunID: "eval", Target: srv.URL, Profile: model.ProfileVerification,
+			RunID: "eval", Target: srv.URL, Profile: model.ProfileStandard,
 			Surface: engine.Surface{SpecDerived: true, Operations: parsed.Operations},
 			Checks: []engine.Check{check.AuthRequired{
 				Client: client, BaselineProbes: 2, Resources: fixtures,
@@ -1298,7 +1393,7 @@ func runOwnershipWithSink(
 		t.Fatalf("openapi: %v", err)
 	}
 	res, err := engine.Run(context.Background(), engine.Options{
-		RunID: "20260906T130000Z-m2eval01", Target: srv.URL, Profile: model.ProfileVerification,
+		RunID: "20260906T130000Z-m2eval01", Target: srv.URL, Profile: model.ProfileStandard,
 		Surface:       engine.Surface{SpecDerived: true, Operations: parsed.Operations},
 		ResourceCheck: check.CrossOwner{},
 		Resources: []resource.Fixture{{

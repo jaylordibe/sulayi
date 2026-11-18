@@ -22,7 +22,7 @@ func sampleResult() engine.Result {
 		RunID:      "20260905T120000Z-abcd1234",
 		Target:     "http://localhost:3000",
 		TargetName: "fixture",
-		Profile:    model.ProfileVerification,
+		Profile:    model.ProfileStandard,
 		StartedAt:  start,
 		FinishedAt: start.Add(3 * time.Second),
 		Surface: engine.Surface{
@@ -235,7 +235,7 @@ func TestOutputIsDeterministic(t *testing.T) {
 func TestIdentityReportingCarriesNoCredentialMaterial(t *testing.T) {
 	const secret = "SULAYI_M1_SECRET_MUST_NEVER_PERSIST_7f91"
 	res := engine.Result{
-		RunID: "r", Target: "http://localhost:3000", Profile: model.ProfileVerification,
+		RunID: "r", Target: "http://localhost:3000", Profile: model.ProfileStandard,
 		Surface: engine.Surface{SpecDerived: true},
 		Identities: []identity.Status{{
 			ID:        "admin",
@@ -348,7 +348,7 @@ func TestAuthenticatedControlStatement(t *testing.T) {
 // boundary into a statement about the whole application.
 func TestSummaryStatesOwnershipExtent(t *testing.T) {
 	res := engine.Result{
-		RunID: "r", Target: "http://localhost:3000", Profile: model.ProfileVerification,
+		RunID: "r", Target: "http://localhost:3000", Profile: model.ProfileStandard,
 		Surface: engine.Surface{SpecDerived: true},
 		Coverage: []model.CoverageEntry{{
 			Dimension: engine.DimensionOwnership, Subject: "GET /api/orders/{orderId}",
@@ -480,7 +480,7 @@ func TestSummaryStatesComponentsThatFailed(t *testing.T) {
 			"whatever the specification said",
 	}})
 
-	if !strings.Contains(got, "1 component failed") {
+	if !strings.Contains(got, "COVERAGE REDUCED: 1 component did not run or did not complete") {
 		t.Errorf("a failed component is invisible in the terminal:\n%s", got)
 	}
 	if !strings.Contains(got, "adapter laravel exited with status 2") {
@@ -499,7 +499,7 @@ func TestSummaryStatesComponentsThatFailed(t *testing.T) {
 }
 
 func TestSummarySaysNothingWhenNothingFailed(t *testing.T) {
-	if got := Summary(Document{}); strings.Contains(got, "failed during this run") {
+	if got := Summary(Document{}); strings.Contains(got, "COVERAGE REDUCED") {
 		t.Errorf("a clean run reported component failures:\n%s", got)
 	}
 }

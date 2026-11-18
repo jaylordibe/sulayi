@@ -31,9 +31,17 @@ func persistAndSummarize(res engine.Result, run *store.Run, pol config.Policy, s
 	fmt.Fprintf(stdout, "  report:   %s\n", run.Path("report.json"))
 	fmt.Fprintf(stdout, "  sarif:    %s\n", run.Path("report.sarif"))
 
+	// Incomplete cleanup is repeated on stderr: it is the part of this run that
+	// may need somebody to act on the target, and stderr is what survives a
+	// redirected stdout.
+	if n := len(res.CleanupIncomplete); n > 0 {
+		fmt.Fprintf(stderr, "\nsulayi: CLEANUP INCOMPLETE: %d fixture(s) may still be modified; "+
+			"see the summary above and cleanupIncomplete in the report.\n", n)
+	}
+
 	// An assessment that executed nothing establishes nothing, and must not
 	// return the same code as one that ran cleanly.
-	if res.ExecutedCount() == 0 {
+	if res.ExecutedCount() == 0 && res.StoppedEarly == "" {
 		fmt.Fprintln(stderr,
 			"\nsulayi: no checks executed. This run establishes nothing about the target.\n"+
 				"       See the coverage ledger in the report for why each item did not run.")
@@ -46,6 +54,14 @@ func persistAndSummarize(res engine.Result, run *store.Run, pol config.Policy, s
 			fmt.Fprintf(stderr, "  - %s\n", r)
 		}
 		return &exitError{code: ExitFindings}
+	}
+
+	// A run that stopped early did not complete, whatever it found before it
+	// stopped, and must not exit as though it had.
+	if res.StoppedEarly != "" {
+		fmt.Fprintf(stderr, "\nsulayi: stopped early: %s. The report covers only what ran.\n",
+			res.StoppedEarly)
+		return &exitError{code: ExitAborted}
 	}
 	return nil
 }

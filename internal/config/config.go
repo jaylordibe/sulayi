@@ -53,6 +53,19 @@ const MaxConfigBytes = 1 << 20 // 1 MiB
 // configuration invalid.
 const CurrentAPIVersion = "sulayi/v1alpha1"
 
+// httpMethodPattern accepts an HTTP method token as an operator would write one.
+var httpMethodPattern = regexp.MustCompile(`^[A-Za-z]+$`)
+
+// Assessment budget defaults and ceilings. The defaults are deliberately
+// conservative for a first run against an unfamiliar target; both are
+// configurable.
+const (
+	DefaultMaxRequests        = 1000
+	DefaultMaxDurationMinutes = 30
+	MaxMaxRequests            = 100000
+	MaxMaxDurationMinutes     = 24 * 60
+)
+
 // legacyAPIVersion is the apiVersion written before the project was renamed to
 // Sulayi. It is recognised only to reject it with a migration message.
 const legacyAPIVersion = "appsec/v1alpha1"
@@ -96,6 +109,11 @@ type Target struct {
 	BaseURL string `yaml:"baseURL"`
 	// Name is a label used in reports.
 	Name string `yaml:"name"`
+	// Disposable declares that the target is an isolated environment whose
+	// data may be changed or destroyed. The aggressive profile requires it, and
+	// it is a statement in a reviewable file rather than a flag, so that the
+	// decision is visible to whoever reads the configuration.
+	Disposable bool `yaml:"disposable"`
 }
 
 // Scope is the network authorization boundary.
@@ -121,9 +139,19 @@ type ScopeEntry struct {
 type Assessment struct {
 	// Profile is the effective safety profile. It never escalates implicitly.
 	Profile string `yaml:"profile"`
-	// AuthorizeIntrusive must be true for the intrusive profile to be accepted.
-	// A profile alone is not authorization.
-	AuthorizeIntrusive bool `yaml:"authorizeIntrusive"`
+	// LegacyAuthorizeIntrusive is the pre-Sulayi authorization switch. It is
+	// parsed only so that a configuration still using it is refused with a
+	// migration message rather than a generic unknown-field error.
+	LegacyAuthorizeIntrusive *bool `yaml:"authorizeIntrusive"`
+	// MaxRequests bounds every request the assessment sends to the target. A
+	// small fixed allowance above it is reserved for restoring fixtures.
+	MaxRequests int `yaml:"maxRequests"`
+	// MaxDurationMinutes bounds the wall-clock length of the assessment.
+	MaxDurationMinutes int `yaml:"maxDurationMinutes"`
+	// StateChangingOperations lists operation ids that change state even though
+	// their HTTP method says otherwise, such as GET /logout. They are held to
+	// the rules for state-changing requests whatever their method.
+	StateChangingOperations []string `yaml:"stateChangingOperations"`
 	// Concurrency bounds simultaneous requests to the target.
 	Concurrency int `yaml:"concurrency"`
 	// RequestsPerSecond bounds request rate. Assessment tooling that hammers a
@@ -218,6 +246,10 @@ type Resource struct {
 	NonOwners []string `yaml:"nonOwners"`
 	// Mutation enables cross-owner write testing. Absent means read-only.
 	Mutation *ResourceMutation `yaml:"mutation"`
+	// Disposable declares this exact resource disposable test data. Under the
+	// standard profile, state-changing requests are permitted only against the
+	// exact requests bound from disposable fixtures.
+	Disposable bool `yaml:"disposable"`
 }
 
 // ResourceMutation holds the explicit values a cross-owner write attempts.
@@ -301,7 +333,7 @@ type Engine struct {
 	Templates string `yaml:"templates"`
 	Rules     string `yaml:"rules"`
 	// Mode narrows what an engine may do, for engines that have modes. ZAP's
-	// "active" mode sends attack payloads and requires the intrusive profile.
+	// "active" mode sends attack payloads and requires the aggressive profile.
 	Mode string `yaml:"mode"`
 	// Severity optionally narrows which severities an engine reports.
 	Severity []string `yaml:"severity"`
@@ -416,7 +448,9 @@ func Default() Config {
 	return Config{
 		APIVersion: CurrentAPIVersion,
 		Assessment: Assessment{
-			Profile:              string(model.ProfileVerification),
+			Profile:              string(model.ProfileStandard),
+			MaxRequests:          DefaultMaxRequests,
+			MaxDurationMinutes:   DefaultMaxDurationMinutes,
 			Concurrency:          4,
 			RequestsPerSecond:    10,
 			TimeoutSeconds:       20,
@@ -502,12 +536,47 @@ func (c *Config) Validate() error {
 	}
 
 	profile := model.Profile(c.Assessment.Profile)
-	if !profile.Valid() {
+	if replacement, legacy := model.LegacyProfiles[c.Assessment.Profile]; legacy {
 		problems = append(problems, fmt.Sprintf(
-			"assessment.profile %q is not one of discovery, verification, intrusive", c.Assessment.Profile))
-	} else if profile == model.ProfileIntrusive && !c.Assessment.AuthorizeIntrusive {
-		problems = append(problems, "assessment.profile is intrusive but assessment.authorizeIntrusive is not set; "+
-			"intrusive testing can change or destroy data and must be authorized explicitly")
+			"assessment.profile %q is a pre-Sulayi profile name; the closest is %q. Profiles are now "+
+				"safe, standard (default) and aggressive, and they permit different things, so the "+
+				"name is not translated automatically", c.Assessment.Profile, replacement))
+	} else if !profile.Valid() {
+		problems = append(problems, fmt.Sprintf(
+			"assessment.profile %q is not one of safe, standard, aggressive", c.Assessment.Profile))
+	} else if profile == model.ProfileAggressive && !c.Target.Disposable {
+		problems = append(problems, "assessment.profile is aggressive but target.disposable is not true; "+
+			"aggressive testing can change or destroy any data the target holds, so the target must be "+
+			"declared an isolated, disposable environment")
+	}
+	if profile == model.ProfileAggressive {
+		// Every origin aggressive testing may reach is named exactly. A wildcard
+		// or an unstated scheme is a range of hosts, and nobody can have
+		// declared a range of hosts disposable.
+		for i, e := range c.Scope.Include {
+			if e.Scheme == "" || strings.HasPrefix(e.Host, "*.") || len(e.Ports) > 1 {
+				problems = append(problems, fmt.Sprintf("scope.include[%d] must name one exact origin "+
+					"(an explicit scheme, no wildcard host and at most one port) under the aggressive profile", i))
+			}
+		}
+	}
+	if c.Assessment.LegacyAuthorizeIntrusive != nil {
+		problems = append(problems, "assessment.authorizeIntrusive was removed: the aggressive profile is "+
+			"authorized by target.disposable: true and a confirmation naming the target")
+	}
+	for i, id := range c.Assessment.StateChangingOperations {
+		method, path, ok := strings.Cut(strings.TrimSpace(id), " ")
+		if !ok || !httpMethodPattern.MatchString(method) || !strings.HasPrefix(strings.TrimSpace(path), "/") {
+			problems = append(problems, fmt.Sprintf(
+				"assessment.stateChangingOperations[%d] %q is not of the form \"METHOD /path\"", i, id))
+		}
+	}
+	if c.Assessment.MaxRequests < 1 || c.Assessment.MaxRequests > MaxMaxRequests {
+		problems = append(problems, fmt.Sprintf("assessment.maxRequests must be between 1 and %d", MaxMaxRequests))
+	}
+	if c.Assessment.MaxDurationMinutes < 1 || c.Assessment.MaxDurationMinutes > MaxMaxDurationMinutes {
+		problems = append(problems, fmt.Sprintf(
+			"assessment.maxDurationMinutes must be between 1 and %d", MaxMaxDurationMinutes))
 	}
 
 	if c.Assessment.Concurrency < 1 || c.Assessment.Concurrency > 64 {
@@ -718,9 +787,9 @@ func (c Config) validateEngines() []string {
 			if e.Mode != "" && e.Mode != "passive" && e.Mode != "active" {
 				problems = append(problems, path+`.mode must be "passive" or "active"`)
 			}
-			if e.Mode == "active" && c.Profile() != model.ProfileIntrusive {
+			if e.Mode == "active" && c.Profile() != model.ProfileAggressive {
 				problems = append(problems, "engines.zap.mode is active, which sends attack "+
-					"payloads and requires assessment.profile: intrusive")
+					"payloads and requires assessment.profile: aggressive")
 			}
 		}
 	}
@@ -803,6 +872,7 @@ func (c Config) ResourceFixtures() []resource.Fixture {
 			Values:           r.Values,
 			Operations:       r.Operations,
 			NonOwners:        r.NonOwners,
+			Disposable:       r.Disposable,
 			// Everything configurable is, by definition, configured. Resources
 			// created through the application's own API would carry
 			// ProvenanceAPICreated, and M2 does not create any.

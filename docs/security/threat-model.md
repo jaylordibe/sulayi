@@ -98,6 +98,12 @@ same address; DNS names that resolve to loopback.
   **IMPLEMENTED**.
 - Callback/OAST behaviour requires explicit configuration. **DESIGNED**.
 
+**Path prefixes (S0).** A scope entry's `pathPrefix` confines by whole segments —
+`/api` grants `/api/x`, not `/apiv2` — and a path carrying a dot segment or an
+encoded separator is never inside a prefix, raw or percent-encoded, because the
+server normalises `/api/%2e%2e/admin` to `/admin`. **TESTED**
+(`scope.TestPathPrefixCannotBeEscaped`).
+
 ### T-02 The scanner is used as an SSRF weapon
 
 A hostile or careless target can attempt to make our privileged network position useful
@@ -243,6 +249,13 @@ The most likely real-world harm from this tool is not a broken scan — it is a 
 - Un-redacted capture is not available. If it is ever added it must be per-run, explicit,
   and loudly recorded in the report. **PLANNED**.
 
+**Cookies (S0).** From a `Set-Cookie` header only the cookie's own value is learned
+as a secret, quoted or not; its attributes (domain, path, expiry) are not, because
+learning them blanked the target's hostname out of every later exchange. Values
+shorter than four characters are still not learned, deliberately: registering a
+one-character value would redact that character everywhere. A session cookie that
+short is a residual risk. **TESTED** (`redact.TestSetCookieLearnsOnlyTheCookieValue`).
+
 ### T-07 Report and evidence leakage
 
 Reports are the artefact most likely to be shared, attached to a ticket, or uploaded to
@@ -309,19 +322,49 @@ output, is size-capped, and is schema-validated before it can influence a plan.
 
 ### T-12 Destructive or state-changing tests running accidentally
 
-The framework will eventually send requests that change data.
+The framework sends requests that change data, and its default profile does.
 
-**Controls.** Three strictly ordered profiles. Required impact is computed per
-**(check, operation)** rather than per check — a check that iterates a specification would
-otherwise send an unauthenticated `DELETE` under a read-only profile, destroying data
-while proving the very weakness it was hunting. Unsafe methods require `intrusive`; work
-exceeding the effective profile is **not executed and is recorded as blocked with a
-reason**. The gate fails closed on an unrecognised profile. Selecting `intrusive` is not
-itself authorization: `authorizeIntrusive` must also be set. Authentication routes are
-excluded from anonymous sweeps by default, because sweeping them can lock real accounts.
-**TESTED** (`model.TestProfileGateFailsClosed`, `TestUnsafeMethodsRequireIntrusive`,
-`engine.TestUnsafeMethodsAreBlockedBelowIntrusive`, `TestAuthRoutesAreExcludedByDefault`,
-`config.TestIntrusiveProfileRequiresExplicitAuthorization`).
+**Controls.** Three strictly ordered profiles: `safe` < `standard` (default) <
+`aggressive` ([ADR-0019](../adr/0019-safety-enforced-at-the-http-client.md)).
+
+- **The decision is made in `httpx.Do`, from the request itself.** Every request
+  passes through it, so no check can send a state-changing request around it, and
+  it never accepts a check's description of what it is sending. A request is
+  state-changing when its method is not read-only or when it matches an operation
+  the operator listed in `assessment.stateChangingOperations` (`GET /logout`).
+  **TESTED** (`httpx.TestSafeProfileRefusesEveryStateChangingRequest`,
+  `httpx.TestConfiguredStateChangingTemplateMatchesConcretePaths`).
+- **`standard` permits only exact registered fixture requests.** The planner
+  registers, for each fixture declared `disposable`, the exact method and URL
+  (path and query) it will send and the body fields that fixture may change, then
+  seals the registry before anything executes. Another record, another query,
+  another method, an unregistered field, an empty or non-JSON body, a dot or
+  encoded-separator segment, and every `DELETE` are refused before anything is
+  sent. **TESTED** (`httpx.TestStandardProfilePermitsOnlyExactRegisteredFixtureRequests`,
+  `httpx.TestGrantsAreClosedAndNarrow`, `evals.TestS0_StandardProfileWritesOnlyADisposableFixture`,
+  `evals.TestM2_MutationOfANonDisposableFixtureRequiresAggressive`).
+- **A client with no guard fails closed** — it behaves as `safe`. **TESTED**
+  (`httpx.TestNilGuardFailsClosed`).
+- The planner applies the same rules first, so a refusal at the client is a
+  backstop rather than the plan; work exceeding the profile is recorded as blocked
+  with a reason. Impact is computed per **(check, operation)**, never per check.
+  **TESTED** (`model.TestProfileGateFailsClosed`, `model.TestUnsafeMethodsRequireAggressive`,
+  `engine.TestUnsafeMethodsAreBlockedBelowIntrusive`, `TestAuthRoutesAreExcludedByDefault`).
+- **`aggressive` is authorized by three things, all required:** `target.disposable:
+  true` in the configuration; an interactive confirmation in which the operator
+  types the target's exact origin (or `--yes` where there is no terminal, which
+  replaces only the prompt); and scope entries that each name one exact origin.
+  Anything less stops the run before a request is sent. **TESTED**
+  (`config.TestAggressiveProfileRequiresDisposableTarget`,
+  `cli.TestAggressiveProfileIsRefusedUnlessFullyAuthorized`,
+  `cli.TestAggressiveProfileRunsOnceConfirmed`).
+- Pre-Sulayi profile names and `authorizeIntrusive` are refused with a migration
+  message, never translated. **TESTED** (`config.TestLegacyProfileNamesAreRefused`,
+  `config.TestLegacyAuthorizeIntrusiveIsRefused`).
+
+**Limitation.** A read-only method is assumed not to change state unless the
+operator lists it. An application whose `GET` endpoints mutate data is protected
+only as far as `stateChangingOperations` names them; nothing infers it.
 
 ### T-13 Concurrent assessments interfere
 
@@ -476,6 +519,12 @@ hand over, often with real privilege.
   configured credential would be inherited by a third-party binary. This is already recorded
   as an M4 acceptance criterion and is restated here because M1 is what makes it dangerous.
 
+**Credentials are bound to their origin (S0).** Scope may name several hosts; that
+authorizes contacting them, not handing each of them every identity's credential.
+An identity's request to any origin other than its target's is refused in
+`httpx.Do` before anything is sent, and recorded in the request log. **TESTED**
+(`identity.TestCredentialIsNeverSentToAnotherInScopeOrigin`).
+
 ### T-17 Resource fixtures, cross-owner probing and mutation
 
 M2 introduced the first requests Sulayi builds from operator-supplied
@@ -531,11 +580,11 @@ change somebody's records. Both are new classes of harm.
 
 **Mutation must be consented to, verified, and reported honestly.**
 
-- A cross-owner write is state-changing, so `RequiredProfileForMethod` gates it to
-  the intrusive profile, which itself requires `authorizeIntrusive`. The fixture
-  must additionally carry a `mutation` block. Three separate acts of consent, none
-  implicit. **TESTED** (`evals.TestM2_MutationRequiresTheIntrusiveProfile`, which
-  asserts zero write requests were sent).
+- A cross-owner write is state-changing. Under `standard` it is sent only when the
+  fixture is declared `disposable`, and only as the exact registered request (see
+  T-12); otherwise it needs `aggressive`. The fixture must additionally carry a
+  `mutation` block. **TESTED** (`evals.TestM2_MutationOfANonDisposableFixtureRequiresAggressive`,
+  which asserts zero write requests were sent).
 - A write with no readable operation to observe it is refused rather than sent:
   an unverifiable write is all risk and no evidence. **TESTED**
   (`evals.TestM2_MutationWithoutAReadableOperationIsBlocked`, asserting zero
@@ -692,6 +741,26 @@ target somebody operates, from a machine holding this tool's credentials. Each i
 untrusted in three separate ways: the binary itself, the corpus it executes, and
 the output it produces.
 
+**Status since S0: an engine that opens its own network connections is not run,
+in any profile.** Nuclei and ZAP make connections Sulayi's scope enforcement
+cannot see — no URL gate, no dial-time address check, no redirect policy, no
+request budget, no request log — so running them would be a security tool
+bypassing the boundary it exists to keep. They are refused before the binary is
+probed or started, recorded as a blocked ledger row with the reason, their
+classes stay unassessed, and the terminal says coverage was reduced. `doctor`
+reports them as blocked without executing them. Only an integration declared
+`Offline` (the source scanner, which reads local files) runs. This is a temporary
+limitation until a verified outbound-destination control exists, not a removal;
+the integrations below are kept and their argument vectors are still checked
+against real binaries by the manual integration job. **TESTED**
+(`scanner.TestNetworkEnginesAreRefusedInEveryProfile`, which builds a binary that
+records being started and asserts it never was, in every profile and ZAP mode;
+`scanner.TestOnlyOfflineEnginesAreDeclaredOffline`;
+`cli.TestEnabledNetworkEngineIsBlockedAndTheTerminalSaysCoverageWasReduced`).
+
+The controls below describe the integrations as built. Where one is about network
+behaviour, it applies only once an engine is permitted to run again.
+
 **The process is contained.** All three share the supervisor built for framework
 adapters, so there is one implementation of every guarantee rather than three.
 
@@ -706,7 +775,8 @@ adapters, so there is one implementation of every guarantee rather than three.
   that keeps touching a file and asserts it stops).
 - `WaitDelay`, so a child holding a pipe open cannot block the assessment
   indefinitely. **TESTED** (`scanner.TestHungPipeDoesNotBlockForever`).
-- Every resolved address is scope-checked before any dial, and the request is
+- *(Sulayi's own HTTP client, not the engines — which is why S0 blocks them.)*
+  Every resolved address is scope-checked before any dial, and the request is
   refused entirely if any one of them is denied. Connection attempts then proceed
   through the authorized addresses in turn, sequentially rather than raced, so a
   name that resolves to more addresses than the target listens on is reachable
@@ -782,8 +852,7 @@ cannot.**
   Nuclei template or ZAP rule does once the engine is running. A template in the
   supplied corpus can address a host of its own choosing, and ZAP's spider
   reaches what it can find. The mitigations above narrow this; they do not close
-  it, and the report says so on every run rather than implying containment that
-  does not exist.
+  it. Since S0 that is no longer disclosed and accepted: such engines are not run.
 
 **An engine result is visible without being promoted.** An imported alert is
 `observed`, which is neither confirmed nor suspected — so the findings line alone
@@ -1050,6 +1119,48 @@ it is a different bug with a different oracle, and answering it with
 confident answer to a question nobody asked. **TESTED**
 (`resource.TestAFixtureDoesNotApplyToOperationsThatAddressNoObject`, built from
 the operations that actually produced the false positives).
+
+### T-22 Stopping, limits and accountability (S0)
+
+An autonomous assessment must be stoppable, bounded and reconstructible, and
+stopping it must not be how data gets left modified.
+
+- **Interrupting stops the run, not the cleanup.** The first SIGINT or SIGTERM
+  cancels the assessment: unreached work is recorded as cancelled and child
+  process groups are killed. Once a cross-owner write may have reached the
+  target, the owner's after-read, the restoration and its verification run on a
+  detached context bounded to 30 seconds, so cancellation and the duration limit
+  cannot interrupt them. A second signal exits at once. **TESTED**
+  (`evals.TestS0_CancellationAfterTheWriteStillRestoresTheFixture`, which cancels
+  the run at the moment the write lands and fails if the detachment is removed).
+- **Incomplete cleanup is never folded into a clean result.** A restoration that
+  fails, cannot be verified, or cannot be attempted because the fixture's state is
+  unknown names the fixture in `cleanupIncomplete`, at the top of the terminal
+  summary, on stderr and as a SARIF notification. **TESTED**
+  (`evals.TestS0_FailedRestorationIsReportedAsIncompleteCleanup`,
+  `engine.TestOwnershipToolFailureBecomesRunState`).
+- **Hard limits.** `assessment.maxRequests` (default 1,000) is counted in
+  `httpx.Do` and refuses before anything is sent; restoration draws on a small
+  allowance above it (four requests per possible write), and that allowance is
+  finite too. `assessment.maxDurationMinutes` (default 30) bounds the run. A run
+  stopped by either, or interrupted, still writes its report, says why it stopped,
+  records the unreached work as blocked, and exits 4 rather than 0. **TESTED**
+  (`httpx.TestBudgetRefusesBeyondTheLimitAndSendsNothing`,
+  `cli.TestRequestBudgetStopsTheRunAndSaysSo`, `cli.TestStoppedEarlyNamesTheReason`).
+- **Every request is accounted for.** `requests.jsonl` in the run directory holds
+  one redacted line per `Do` call — sent, refused, not sent, or failed in flight —
+  with the identity that sent it. If a line cannot be written, every later request
+  is refused, so the log never has a silent gap. The run directory is created
+  before the first request, so discovery is logged too. External engine traffic is
+  not in it, which is one reason those engines do not run. **TESTED**
+  (`httpx.TestEveryCallIsAuditedOnceIncludingRefusals`,
+  `httpx.TestAuditFailureStopsFurtherRequests`,
+  `cli.TestRequestLogRecordsEveryRequestAndNoCredential`, which also searches every
+  file under `.sulayi/` for a credential the target reflects).
+- **Distinguishing "never sent" from "may have arrived"** decides whether a write
+  needs cleaning up, so refusals and pre-send cancellations carry a type of their
+  own rather than a message. **TESTED** (`httpx.TestCancelledPacingWaitIsNotSent`,
+  `httpx.TestNotSentIsFalseForTransportFailures`).
 
 ## 3. Residual risk accepted at this stage
 

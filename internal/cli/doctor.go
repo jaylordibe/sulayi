@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -142,16 +143,24 @@ func reportEngines(ctx context.Context, stdout io.Writer, configPath string) {
 
 	for _, e := range []scanner.Engine{nuclei.New(), zap.New(), sast.New()} {
 		meta := e.Meta()
+		enabledLabel := "disabled"
+		if settings[meta.ID].Enabled {
+			enabledLabel = "enabled"
+		}
+		// An engine that opens its own network connections is not executed here
+		// either: probing its version means running it, and some engines
+		// contact the network on start-up. It is reported as blocked, with why.
+		if !meta.Offline {
+			fmt.Fprintf(stdout, "  %-12s %-18s %-9s %s\n", meta.Title, "BLOCKED", enabledLabel, meta.Unlocks)
+			fmt.Fprint(stdout, wrapIndented(scanner.NetworkBlockedDetail(meta.Title), 64, "               "))
+			continue
+		}
 		avail := e.Detect(ctx, settings[meta.ID])
 		status := "not found"
 		if avail.Present {
 			status = "found " + avail.Version
 		}
-		enabled := "disabled"
-		if settings[meta.ID].Enabled {
-			enabled = "enabled"
-		}
-		fmt.Fprintf(stdout, "  %-12s %-18s %-9s %s\n", meta.Title, status, enabled, meta.Unlocks)
+		fmt.Fprintf(stdout, "  %-12s %-18s %-9s %s\n", meta.Title, status, enabledLabel, meta.Unlocks)
 		if !avail.Present {
 			fmt.Fprintf(stdout, "  %-12s %s\n", "", meta.InstallHint)
 			if avail.Problem != "" {
@@ -176,4 +185,25 @@ func loadConfigIfPresent(configPath string) (config.Config, error) {
 		path = "sulayi.yaml"
 	}
 	return config.Load(path)
+}
+
+// wrapIndented breaks text into lines of at most width characters, each
+// prefixed with indent.
+func wrapIndented(text string, width int, indent string) string {
+	var b strings.Builder
+	line := ""
+	for _, w := range strings.Fields(text) {
+		if line != "" && len(line)+1+len(w) > width {
+			b.WriteString(indent + line + "\n")
+			line = ""
+		}
+		if line != "" {
+			line += " "
+		}
+		line += w
+	}
+	if line != "" {
+		b.WriteString(indent + line + "\n")
+	}
+	return b.String()
 }

@@ -251,18 +251,35 @@ func (r *Redactor) Header(h map[string][]string) map[string][]string {
 }
 
 // learn registers a credential observed at runtime so that later captures redact
-// it too. Cookie headers carry name=value pairs; the value is the secret.
+// it too.
+//
+// A Cookie header is a list of name=value pairs, each value a secret. A
+// Set-Cookie header is one name=value pair followed by attributes (RFC 6265
+// §4.1.1): only the first pair's value is the secret. Registering attribute
+// values as well would treat the domain, path and expiry as secrets and blank
+// them out of every later exchange, the hostname included.
 func (r *Redactor) learn(name, value string) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return
 	}
-	lower := strings.ToLower(name)
-	if lower == "cookie" || lower == "set-cookie" {
-		for _, part := range strings.Split(value, ";") {
-			if eq := strings.IndexByte(part, '='); eq > 0 {
-				r.Register(strings.TrimSpace(part[eq+1:]), Placeholder)
+	register := func(pair string) {
+		if eq := strings.IndexByte(pair, '='); eq > 0 {
+			v := strings.TrimSpace(pair[eq+1:])
+			r.Register(v, Placeholder)
+			if unq := strings.Trim(v, `"`); unq != v {
+				r.Register(unq, Placeholder)
 			}
+		}
+	}
+	switch strings.ToLower(name) {
+	case "set-cookie":
+		pair, _, _ := strings.Cut(value, ";")
+		register(pair)
+		return
+	case "cookie":
+		for _, pair := range strings.Split(value, ";") {
+			register(pair)
 		}
 		return
 	}
