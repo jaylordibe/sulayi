@@ -780,6 +780,29 @@
               "description": "Defaults to true. Assess operations a framework adapter found that the specification omits. This is the one case where discovered surface is testable without inventing anything: the adapter read the routing table, so the HTTP method is known and the authentication expectation comes from the same source that would have supplied it had the route been documented."
             }
           }
+        },
+        "crawl": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The bounded, same-origin, GET-only crawler. It never submits a form, runs no script and never requests a sign-out route.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Defaults to true."
+            },
+            "maxPages": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "description": "Pages per identity. Default 50."
+            },
+            "maxDepth": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Links followed from the root. Default 3."
+            }
+          }
         }
       },
       "not": {
@@ -805,6 +828,29 @@
             }
           }
         ]
+      }
+    },
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The declared access policy: which routes require authentication and which are public. It states expected behaviour and is never evidence; a finding against it is confirmed only by verification. Public patterns are exceptions to protected ones.",
+      "properties": {
+        "protected": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/",
+            "description": "A path pattern: * matches one segment, a trailing ** any number."
+          }
+        },
+        "public": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/",
+            "description": "A path pattern: * matches one segment, a trailing ** any number."
+          }
+        }
       }
     },
     "outcome": {

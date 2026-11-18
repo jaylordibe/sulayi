@@ -58,6 +58,11 @@ things that makes a row in it meaningful.
   Findings + Coverage ──────► reports (JSON, SARIF)
 ```
 
+> **Since S2** the specification is one source of surface, not a requirement:
+> framework adapters, browser recordings and a bounded crawler supply operations, and a
+> declared access policy supplies the oracle. See
+> [ADR-0021](adr/0021-surface-without-a-specification.md) and threat model T-24.
+
 **Two deviations from the originally proposed pipeline**, both deliberate:
 
 1. **Outcome classification is its own stage.** Evidence from the reference applications

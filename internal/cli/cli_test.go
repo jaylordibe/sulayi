@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -91,9 +92,10 @@ func TestInvalidProfileFailsWithUsage(t *testing.T) {
 	}
 }
 
-// A target with no discoverable specification must abort with an explanation,
-// not report a clean run.
-func TestNoSpecificationAborts(t *testing.T) {
+// A target with no specification is crawled. When nothing is found either,
+// the run establishes nothing and says what would give it a surface — it never
+// reports a clean result.
+func TestNoSpecificationAndNothingFoundEstablishesNothing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(404)
 	}))
@@ -101,6 +103,30 @@ func TestNoSpecificationAborts(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	code, _, errOut := run(t, "attack", srv.URL)
+	if code != ExitNothingExecuted {
+		t.Fatalf("exit = %d, want %d (executed nothing)", code, ExitNothingExecuted)
+	}
+	for _, want := range []string{"--spec", "--har", "adapter"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr does not say how to give the run a surface (%q): %q", want, errOut)
+		}
+	}
+}
+
+// With the crawler turned off and no other source, a missing specification is
+// still an abort with an explanation, as before.
+func TestNoSpecificationAndNoOtherSourceAborts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte("apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: "+
+		srv.URL+"\ndiscovery:\n  crawl:\n    enabled: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := run(t, "attack")
 	if code != ExitAborted {
 		t.Fatalf("exit = %d, want %d (aborted)", code, ExitAborted)
 	}
@@ -1025,5 +1051,283 @@ func TestTrackedEnvFileStopsTheRun(t *testing.T) {
 	}
 	if _, err := os.Stat(".sulayi"); err == nil {
 		t.Error("a run directory was created for a run that was refused")
+	}
+}
+
+// specLessApp is an application with no OpenAPI document. Anonymous visitors
+// see a home page linking to the login page; a signed-in user's home page
+// links to a dashboard, an API report and a sign-out link. The API report is
+// served to anyone — the defect — while the dashboard shows anonymous callers
+// the login page. It records every path requested.
+type specLessApp struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (a *specLessApp) handler(token string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		a.seen = append(a.seen, r.Method+" "+r.URL.Path)
+		a.mu.Unlock()
+		signedIn := r.Header.Get("Authorization") == "Bearer "+token
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			if signedIn {
+				_, _ = w.Write([]byte(`<a href="/dashboard">Dashboard</a> <a href="/api/reports">Reports</a>
+				  <a href="/api/summary">Summary</a> <a href="/logout">Sign out</a>`))
+				return
+			}
+			_, _ = w.Write([]byte(`<a href="/login">Sign in</a>`))
+		case "/login":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<form action="/login" method="post"></form>`))
+		case "/dashboard":
+			w.Header().Set("Content-Type", "text/html")
+			if signedIn {
+				_, _ = w.Write([]byte(`<h1>Your dashboard</h1>`))
+				return
+			}
+			_, _ = w.Write([]byte(`<form action="/login" method="post"></form>`))
+		case "/api/reports":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"reports":[{"id":1,"total":4200}]}`))
+		case "/api/summary":
+			// Answers everyone with 200, but tells an anonymous caller to sign
+			// in: a different document, not the protected data.
+			w.Header().Set("Content-Type", "application/json")
+			if signedIn {
+				_, _ = w.Write([]byte(`{"user":"alice","balance":1200,"orders":3}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"message":"please sign in"}`))
+		case "/api/me":
+			if !signedIn {
+				w.WriteHeader(401)
+				return
+			}
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			w.WriteHeader(404)
+		}
+	})
+}
+
+func (a *specLessApp) requested(methodPath string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, s := range a.seen {
+		if s == methodPath {
+			return true
+		}
+	}
+	return false
+}
+
+func runSpecLess(t *testing.T, access string) (*specLessApp, map[string]any, string) {
+	t.Helper()
+	const token = "speclessTOKEN0123456789abcdef"
+	app := &specLessApp{}
+	srv := httptest.NewServer(app.handler(token))
+	t.Cleanup(srv.Close)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("SULAYI_SPECLESS_TOKEN", token)
+	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
+		"discovery:\n  probeWellKnownPaths: false\n" + access +
+		"identities:\n  - id: alice\n    authentication:\n      type: bearer\n" +
+		"      credential: {env: SULAYI_SPECLESS_TOKEN}\n    liveness: {method: GET, path: /api/me}\n"
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ := run(t, "attack")
+	reports, _ := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "report.json"))
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d\n%s", len(reports), out)
+	}
+	raw, _ := os.ReadFile(reports[0])
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return app, doc, out
+}
+
+func findingsFor(doc map[string]any, opID string) []map[string]any {
+	var out []map[string]any
+	fs, _ := doc["findings"].([]any)
+	for _, f := range fs {
+		m, _ := f.(map[string]any)
+		if m["operationId"] == opID {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// With no specification, a declared access policy makes a crawled route
+// confirmable — through the same authenticated-control verification as any
+// finding — and the crawler never requests the sign-out link it was shown.
+func TestSpecLessRouteIsConfirmedAgainstADeclaredPolicy(t *testing.T) {
+	app, doc, out := runSpecLess(t, "access:\n  protected: [\"/api/**\", \"/dashboard\"]\n")
+	if app.requested("GET /logout") {
+		t.Fatal("the crawler requested the sign-out link")
+	}
+	if app.requested("POST /login") {
+		t.Fatal("a form was submitted")
+	}
+	fs := findingsFor(doc, "GET /api/reports")
+	if len(fs) != 1 || fs[0]["state"] != "confirmed" {
+		t.Fatalf("findings on GET /api/reports = %v\n%s", fs, out)
+	}
+	if fs := findingsFor(doc, "GET /dashboard"); len(fs) != 0 {
+		t.Errorf("the dashboard, which shows anonymous callers the login page, was reported: %v", fs)
+	}
+	if !strings.Contains(out, "access:   policy declared") || !strings.Contains(out, "crawl:    as alice") {
+		t.Errorf("the summary does not account for the surface's sources:\n%s", out)
+	}
+}
+
+// Without a policy, a route reached only while signed in and served to anyone
+// is at most suspected; one that shows anonymous callers something else is not
+// reported at all.
+func TestSpecLessRouteWithoutPolicyIsOnlySuspected(t *testing.T) {
+	_, doc, out := runSpecLess(t, "")
+	fs := findingsFor(doc, "GET /api/reports")
+	if len(fs) != 1 || fs[0]["state"] != "suspected" {
+		t.Fatalf("findings on GET /api/reports = %v\n%s", fs, out)
+	}
+	if fs := findingsFor(doc, "GET /api/summary"); len(fs) != 0 {
+		t.Errorf("a navigation inference produced a finding on a route that answers anonymous callers "+
+			"with a different document: %v", fs)
+	}
+	if !strings.Contains(out, "inferred: ") {
+		t.Errorf("the summary does not say routes were inferred:\n%s", out)
+	}
+}
+
+// A browser recording adds routes and nothing else. Its POST is not sent under
+// the standard profile, nothing it carried reaches disk, and nothing in it is
+// replayed.
+func TestHARIsDiscoveryOnly(t *testing.T) {
+	app := &specLessApp{}
+	srv := httptest.NewServer(app.handler("unused-token-0123456789"))
+	defer srv.Close()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	har := `{"log":{"entries":[
+	 {"request":{"method":"GET","url":"` + srv.URL + `/api/reports?key=HAR-QUERY-SECRET",
+	   "headers":[{"name":"Authorization","value":"Bearer HAR-HEADER-SECRET"}]},
+	  "response":{"content":{"text":"HAR-RESPONSE-SECRET"}}},
+	 {"request":{"method":"POST","url":"` + srv.URL + `/api/reports",
+	   "postData":{"text":"{\"password\":\"HAR-BODY-SECRET\"}"}}}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "app.har"), []byte(har), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
+		"discovery:\n  probeWellKnownPaths: false\n  crawl: {enabled: false}\n" +
+		"access:\n  protected: [\"/api/**\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, errOut := run(t, "attack", "--har", "app.har")
+	if app.requested("POST /api/reports") {
+		t.Fatal("a recorded POST was sent")
+	}
+	if !app.requested("GET /api/reports") {
+		t.Fatalf("the recorded GET route was not assessed\n%s\n%s", out, errOut)
+	}
+	if !strings.Contains(errOut, "nothing in it is replayed") {
+		t.Errorf("stderr does not account for the recording: %s", errOut)
+	}
+	_ = filepath.Walk(filepath.Join(dir, ".sulayi"), func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		b, _ := os.ReadFile(p)
+		for _, s := range []string{"HAR-QUERY-SECRET", "HAR-HEADER-SECRET", "HAR-RESPONSE-SECRET", "HAR-BODY-SECRET"} {
+			if bytes.Contains(b, []byte(s)) {
+				t.Errorf("%s contains %q", filepath.Base(p), s)
+			}
+		}
+		return nil
+	})
+}
+
+// With no specification and no crawl, a framework adapter's routing table is
+// the whole surface. Black-box discovery does not depend on it; this checks
+// that source access, when given, is enough on its own — and that what it
+// infers stays suspected.
+func TestAdapterAloneIsASurface(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain is not available to build the adapter")
+	}
+	root, err := filepath.Abs(filepath.Join("..", "..", "adapters", "laravel", "testdata", "app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "sulayi-adapter-laravel")
+	build := exec.Command("go", "build", "-o", bin, "./adapters/laravel")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build adapter: %v\n%s", err, out)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/orders", "/api/health":
+			_, _ = w.Write([]byte(`{"data":[{"id":1}]}`))
+		default:
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
+		"discovery:\n  probeWellKnownPaths: false\n  crawl: {enabled: false}\n" +
+		"adapters:\n  sourceRoot: " + root + "\n  use:\n    - name: laravel\n      path: " + bin + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, errOut := run(t, "attack")
+	reports, _ := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "report.json"))
+	if len(reports) != 1 {
+		t.Fatalf("no report\nstdout: %s\nstderr: %s", out, errOut)
+	}
+	raw, _ := os.ReadFile(reports[0])
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	surface, _ := doc["surface"].(map[string]any)
+	if surface["specDerived"] != false || surface["operationCount"].(float64) == 0 {
+		t.Fatalf("surface = %v", surface)
+	}
+	fs := findingsFor(doc, "GET /api/orders")
+	if len(fs) != 1 || fs[0]["state"] != "suspected" {
+		t.Fatalf("findings on GET /api/orders = %v\n%s\n%s", fs, out, errOut)
+	}
+	if !strings.Contains(out, "no specification") {
+		t.Errorf("the summary does not say there was no specification:\n%s", out)
+	}
+}
+
+// An unreachable target is a run that could not complete, not an application
+// with nothing on it — whether the specification probe or the crawl is what
+// discovers that.
+func TestUnreachableTargetAborts(t *testing.T) {
+	for _, args := range [][]string{
+		{"attack", "http://127.0.0.1:1/"},
+		{"attack", "http://127.0.0.1:1/", "--no-probe"},
+	} {
+		t.Chdir(t.TempDir())
+		code, _, errOut := run(t, args...)
+		if code != ExitAborted || !strings.Contains(errOut, "did not respond") {
+			t.Errorf("%v: exit = %d, stderr = %q; want an abort saying the target did not respond", args, code, errOut)
+		}
 	}
 }

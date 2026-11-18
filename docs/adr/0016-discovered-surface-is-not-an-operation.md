@@ -1,6 +1,6 @@
 # ADR-0016: A discovered path is not an operation, and discovery is not a crawler
 
-- **Status:** Accepted
+- **Status:** Accepted; superseded in part by [ADR-0021](0021-surface-without-a-specification.md) (a bounded crawler now fetches what it finds; the passive sources still do not)
 - **Date:** 2026-09-07
 - **Relates to:** [ADR-0008](0008-scope-is-the-authorization-boundary.md),
   [ADR-0010](0010-coverage-is-a-ledger.md),

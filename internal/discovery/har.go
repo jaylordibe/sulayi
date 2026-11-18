@@ -1,0 +1,196 @@
+package discovery
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"path"
+	"regexp"
+	"strings"
+
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/scope"
+)
+
+// MaxHARBytes bounds a HAR file. Browser recordings are large; one bigger than
+// this is not a recording of an application someone clicked through.
+const MaxHARBytes = 64 << 20
+
+// MaxHAROperations bounds how many operations one HAR may contribute.
+const MaxHAROperations = 2000
+
+// HARResult is what a HAR contributed: operations, and an account of what was
+// left out and why.
+type HARResult struct {
+	Operations []model.Operation
+	Entries    int
+	OffOrigin  int
+	Assets     int
+	Skipped    int
+	Sensitive  int
+	Truncated  bool
+}
+
+// harDoc decodes only what discovery uses: each request's method and URL.
+// Headers, cookies, bodies, timings and responses are never read into
+// memory, so nothing in them can be stored, logged or sent anywhere.
+type harDoc struct {
+	Log struct {
+		Entries []struct {
+			Request struct {
+				Method string `json:"method"`
+				URL    string `json:"url"`
+			} `json:"request"`
+		} `json:"entries"`
+	} `json:"log"`
+}
+
+var assetExtensions = map[string]bool{
+	".js": true, ".mjs": true, ".css": true, ".map": true, ".png": true, ".jpg": true, ".jpeg": true,
+	".gif": true, ".svg": true, ".ico": true, ".webp": true, ".avif": true, ".woff": true, ".woff2": true,
+	".ttf": true, ".otf": true, ".eot": true, ".mp4": true, ".webm": true, ".mp3": true,
+}
+
+var harMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
+
+// tokenSegment matches a path segment that looks like a credential or a
+// signed value rather than a route: a JWT, or a long run of URL-safe
+// characters mixing letters and digits.
+var tokenSegment = regexp.MustCompile(`^(?:eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*|[A-Za-z0-9_-]{32,})$`)
+
+// ParseHAR reads a browser recording as discovery input.
+//
+// A HAR is evidence of which requests an application's own front end makes,
+// which is how a single-page application's API is found without a browser. It
+// is never permission to send any of them: nothing is replayed, and each
+// operation it yields is planned and gated exactly like one from a
+// specification. Only same-origin entries under the target's base path are
+// kept, and each becomes a method and a path — query strings are dropped, and
+// an entry whose path carries a token-like segment is left out entirely.
+func ParseHAR(data []byte, baseURL string) (HARResult, error) {
+	var out HARResult
+	if len(data) > MaxHARBytes {
+		return out, fmt.Errorf("the HAR file exceeds %d bytes", MaxHARBytes)
+	}
+	var doc harDoc
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return out, errors.New("the HAR file is not a JSON HAR document")
+	}
+	target, err := scope.ParseOrigin(baseURL)
+	if err != nil {
+		return out, fmt.Errorf("the target's origin cannot be established: %v", err)
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return out, err
+	}
+	basePath := strings.TrimRight(base.Path, "/")
+
+	seen := map[string]bool{}
+	for _, e := range doc.Log.Entries {
+		out.Entries++
+		method := strings.ToUpper(strings.TrimSpace(e.Request.Method))
+		u, err := url.Parse(e.Request.URL)
+		if err != nil || !harMethods[method] {
+			out.Skipped++
+			continue
+		}
+		origin, err := scope.OriginOf(u)
+		if err != nil || origin != target {
+			out.OffOrigin++
+			continue
+		}
+		p := u.Path
+		if p == "" {
+			p = "/"
+		}
+		if basePath != "" {
+			if p != basePath && !strings.HasPrefix(p, basePath+"/") {
+				out.OffOrigin++
+				continue
+			}
+			p = strings.TrimPrefix(p, basePath)
+			if p == "" {
+				p = "/"
+			}
+		}
+		if assetExtensions[strings.ToLower(path.Ext(p))] {
+			out.Assets++
+			continue
+		}
+		if hasDotSegment(p) {
+			out.Skipped++
+			continue
+		}
+		if sensitivePath(p) {
+			out.Sensitive++
+			continue
+		}
+		id := model.OperationID(method, p)
+		if seen[id] {
+			continue
+		}
+		if len(out.Operations) >= MaxHAROperations {
+			out.Truncated = true
+			continue
+		}
+		seen[id] = true
+		out.Operations = append(out.Operations, model.Operation{
+			ID: id, Method: method, PathTemplate: p, BaseURL: baseURL,
+			Sources: []model.Source{{Kind: model.SourceHAR, Ref: "har " + method}},
+		})
+	}
+	model.SortOperations(out.Operations)
+	return out, nil
+}
+
+func hasDotSegment(p string) bool {
+	for _, s := range strings.Split(p, "/") {
+		if s == "." || s == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func sensitivePath(p string) bool {
+	for _, s := range strings.Split(p, "/") {
+		if tokenSegment.MatchString(s) && strings.ContainsAny(s, "0123456789") {
+			return true
+		}
+	}
+	return false
+}
+
+// MergeOperations adds found operations to a surface. One whose method matches
+// an existing operation and whose path fits that operation's template
+// corroborates it — the source is recorded, nothing is duplicated — and the
+// rest are added. It returns the merged surface and how many were added and
+// corroborated.
+func MergeOperations(existing, found []model.Operation) ([]model.Operation, int, int) {
+	out := make([]model.Operation, len(existing))
+	copy(out, existing)
+	var added, corroborated int
+	for _, f := range found {
+		matched := false
+		for i := range out {
+			if out[i].Method != f.Method {
+				continue
+			}
+			if model.PathMatchesTemplate(out[i].AbsolutePath(), f.AbsolutePath()) ||
+				model.PathMatchesTemplate(out[i].PathTemplate, f.PathTemplate) {
+				out[i].Sources = append(out[i].Sources, f.Sources...)
+				matched = true
+				corroborated++
+				break
+			}
+		}
+		if !matched {
+			out = append(out, f)
+			added++
+		}
+	}
+	model.SortOperations(out)
+	return out, added, corroborated
+}

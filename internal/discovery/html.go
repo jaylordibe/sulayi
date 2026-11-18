@@ -7,11 +7,10 @@ const maxScriptRefs = 64
 
 // ScriptSources extracts the src attribute of every <script> element.
 //
-// This is deliberately the narrowest possible HTML extraction: script sources
-// and nothing else. Anchors are not followed, forms are not read, iframes are
-// not entered, and no element leads to another document. That restraint is the
-// product boundary — extracting <a href> is the first line of a spider, and this
-// project's thesis says explicitly that it will not build one.
+// This is deliberately the narrowest possible HTML extraction for passive
+// discovery: script sources and nothing else. Anchors and forms are read only
+// by the bounded crawler (crawl.go, ADR-0021), which has its own limits; this
+// function leads to no other document.
 //
 // It is a scanner rather than a parser because a full HTML5 tree builder is a
 // large dependency and a large attack surface for one attribute, and because

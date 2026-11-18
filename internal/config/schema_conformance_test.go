@@ -58,6 +58,19 @@ func validateAgainstSchema(t *testing.T, schema *jsonschema.Schema, doc string) 
 
 // validDocuments must be accepted by both the parser and the schema.
 var validDocuments = map[string]string{
+	"spec-less surface with an access policy and a crawl": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://localhost:3000
+discovery:
+  crawl:
+    enabled: true
+    maxPages: 20
+    maxDepth: 2
+access:
+  protected: ["/api/**", "/admin/*/edit"]
+  public: ["/api/health", "/api/auth/**"]
+`,
 	"login identities with a bearer token and a cookie session": `
 apiVersion: sulayi/v1alpha1
 target:
@@ -258,6 +271,21 @@ assessment:
 // structurallyInvalidDocuments must be rejected by BOTH, because each violation
 // is expressible in the schema.
 var structurallyInvalidDocuments = map[string]string{
+	"access pattern without a leading slash": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+access:
+  protected: ["api/**"]
+`,
+	"crawl depth out of range": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+discovery:
+  crawl:
+    maxDepth: 50
+`,
 	"login with a credential as well": `
 apiVersion: sulayi/v1alpha1
 target:

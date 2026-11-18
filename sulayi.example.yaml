@@ -108,6 +108,16 @@ identities:
   #     credential:
   #       env: SULAYI_SERVICE_KEY
 
+
+access:
+  # The declared access policy: which routes require authentication and which
+  # are public, as path patterns (* is one segment, a trailing ** any number).
+  # It is the oracle for routes no specification describes, and lets findings
+  # against them be confirmed — by the usual verification, never by the policy
+  # itself. Public patterns are exceptions to protected ones.
+  {}
+  # protected: ["/api/**", "/dashboard"]
+  # public: ["/api/health", "/api/auth/**"]
 resources:
   # Concrete resources known to belong to an identity, used to test whether a
   # non-owner can reach or change them. Without a fixture, addressing
@@ -239,6 +249,16 @@ discovery:
   openAPIURL: ""
   probeWellKnownPaths: true
 
+  # The crawler finds routes without a specification: GET only, on the
+  # target's own origin, as the anonymous caller and as each identity. It
+  # never submits a form, runs no script and never requests a sign-out or
+  # other authentication route. A route reached only while signed in is
+  # given an inferred expectation, whose findings stay suspected.
+  crawl:
+    enabled: true
+    # maxPages: 50     # per identity
+    # maxDepth: 3      # links followed from the root
+
   # Surface the specification does not describe.
   #
   # Sulayi reads four things the application publishes about itself:
@@ -247,10 +267,8 @@ discovery:
   # they reveal that no specification or adapter describes becomes one ledger
   # row: untested, with the reason "not in specification".
   #
-  # It is not a crawler. It reads one page and the scripts that page names — no
-  # anchors, no forms, no sitemap, no recursion, no wordlist — and it never
-  # fetches anything it discovered. There is no depth setting here because there
-  # is no traversal to bound.
+  # These passive sources read one page and the scripts that page names and
+  # never fetch anything they discover. The crawler below is separate.
   #
   # A discovered path gets no HTTP method and no security expectation. "/admin"
   # is a string, and "Disallow: /admin" is a request to search engines.

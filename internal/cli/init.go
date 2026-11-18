@@ -122,6 +122,16 @@ identities:
   #     credential:
   #       env: SULAYI_SERVICE_KEY
 
+
+access:
+  # The declared access policy: which routes require authentication and which
+  # are public, as path patterns (* is one segment, a trailing ** any number).
+  # It is the oracle for routes no specification describes, and lets findings
+  # against them be confirmed — by the usual verification, never by the policy
+  # itself. Public patterns are exceptions to protected ones.
+  {}
+  # protected: ["/api/**", "/dashboard"]
+  # public: ["/api/health", "/api/auth/**"]
 resources:
   # Concrete resources known to belong to an identity, used to test whether a
   # non-owner can reach or change them. Without a fixture, addressing
@@ -247,6 +257,16 @@ discovery:
   openAPIFile: ""
   openAPIURL: ""
   probeWellKnownPaths: true
+
+  # The crawler finds routes without a specification: GET only, on the
+  # target's own origin, as the anonymous caller and as each identity. It
+  # never submits a form, runs no script and never requests a sign-out or
+  # other authentication route. A route reached only while signed in is
+  # given an inferred expectation, whose findings stay suspected.
+  crawl:
+    enabled: true
+    # maxPages: 50     # per identity
+    # maxDepth: 3      # links followed from the root
 
 outcome:
   # Real applications rarely follow textbook status codes. If yours publishes a

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
@@ -50,6 +51,7 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 		noProbe    bool
 		yes        bool
 		envFile    string
+		harFile    string
 	)
 
 	cmd := &cobra.Command{
@@ -104,7 +106,21 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 					fmt.Fprintf(stderr, "sulayi: warning: %s\n", w)
 				}
 			}
-			return runScan(cmd.Context(), cfg, creds, stdout, stderr)
+			// A browser recording is read here and reduced to methods and paths;
+			// nothing else from it is kept, and nothing in it is ever sent.
+			var har *discovery.HARResult
+			if harFile != "" {
+				data, err := readBounded(harFile, discovery.MaxHARBytes)
+				if err != nil {
+					return fail(ExitUsage, "cannot read the HAR file %s: %v", harFile, err)
+				}
+				parsed, err := discovery.ParseHAR(data, cfg.Target.BaseURL)
+				if err != nil {
+					return fail(ExitUsage, "%s: %v", harFile, err)
+				}
+				har = &parsed
+			}
+			return runScan(cmd.Context(), cfg, creds, har, stdout, stderr)
 		},
 	}
 
@@ -114,6 +130,8 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&profile, "profile", "", "safety profile: safe, standard (default), aggressive")
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "run output directory (default: .sulayi)")
 	cmd.Flags().BoolVar(&noProbe, "no-probe", false, "do not probe well-known specification paths")
+	cmd.Flags().StringVar(&harFile, "har", "", "browser recording (HAR) of the application, used only "+
+		"to discover its routes: nothing in it is replayed or stored")
 	cmd.Flags().StringVar(&envFile, "env", "", "credentials file of NAME=value lines; only the names "+
 		"sulayi.yaml references are read, and none is exported to child processes")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the aggressive-profile confirmation prompt; "+
@@ -198,7 +216,8 @@ func isLoopbackTarget(raw string) bool {
 	return addr.IsLoopback()
 }
 
-func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, stdout, stderr io.Writer) error {
+func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, har *discovery.HARResult,
+	stdout, stderr io.Writer) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -268,7 +287,10 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, st
 				"so the run directory may be readable by other users")
 	}
 
-	surface, err := discover(ctx, cfg, client, now)
+	// A specification is one source of surface, not a requirement: adapters,
+	// a browser recording and the crawler each find routes without one.
+	specOptional := len(cfg.AdapterSpecs()) > 0 || har != nil || cfg.CrawlEnabled()
+	surface, err := discover(ctx, cfg, client, now, specOptional)
 	if err != nil {
 		return fail(ExitAborted, "discovery failed: %v", err)
 	}
@@ -303,7 +325,16 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, st
 		// assess them. This is the one narrow case where discovered surface is
 		// genuinely testable, and it is still a switch, because it means
 		// requesting routes the operator may not have known were there.
-		if len(merged.DiscoveredOperations) > 0 && cfg.AssessAdapterDiscovered() {
+		// With no specification, the adapter's routing table is the surface.
+		if len(merged.DiscoveredOperations) > 0 && (cfg.AssessAdapterDiscovered() || !surface.SpecDerived) {
+			// An adapter reports application paths, not URLs; they are served
+			// at the target. Without this a check would address a bare path,
+			// which scope rightly refuses.
+			for i := range merged.DiscoveredOperations {
+				if merged.DiscoveredOperations[i].BaseURL == "" {
+					merged.DiscoveredOperations[i].BaseURL = cfg.Target.BaseURL
+				}
+			}
 			surface.Operations = append(surface.Operations, merged.DiscoveredOperations...)
 			model.SortOperations(surface.Operations)
 			for _, op := range merged.DiscoveredOperations {
@@ -318,6 +349,18 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, st
 		// expectation the specification did not carry, and the grade must
 		// reflect the surface actually being assessed.
 		surface.Fidelity = openapi.Grade(surface.Operations)
+	}
+
+	// A browser recording adds the requests the application's own front end
+	// makes. It is discovery only: its operations are planned and gated like
+	// any other, and nothing in it is sent.
+	if har != nil {
+		surface.HAR = har
+		surface.Operations, surface.HARAdded, surface.HARCorroborated =
+			discovery.MergeOperations(surface.Operations, har.Operations)
+		fmt.Fprintf(stderr, "sulayi: browser recording: %d operation(s), %d new to the surface; "+
+			"%d off-origin, %d asset and %d token-bearing entr(ies) left out; nothing in it is replayed\n",
+			len(har.Operations), surface.HARAdded, har.OffOrigin, har.Assets, har.Sensitive)
 	}
 
 	// Discovery of surface the specification does not describe. It runs after
@@ -385,6 +428,100 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, st
 		for _, w := range st.Warnings {
 			fmt.Fprintf(stderr, "sulayi: identity %s: warning: %s\n", st.ID, w)
 		}
+	}
+
+	// The crawler runs once identities are signed in, as the anonymous caller
+	// and then as each usable identity: what only a signed-in user can reach
+	// is exactly the surface an authorization test needs. Every request it
+	// makes goes through the same client — scope, the safety guard, the budget
+	// and the request log — and an identity's through its bound control.
+	if cfg.CrawlEnabled() {
+		pages, depth := cfg.CrawlLimits()
+		skip := func(p string) bool {
+			u := strings.TrimRight(cfg.Target.BaseURL, "/") + p
+			return model.LooksLikeAuthRoute(p) || guard.StateChanging(http.MethodGet, u) ||
+				model.Operation{Method: http.MethodGet, PathTemplate: p}.MatchesAnyID(cfg.Assessment.ExcludeOperations)
+		}
+		actors := []struct {
+			name string
+			do   func(ctx context.Context, u string) (model.Exchange, error)
+		}{{model.AnonymousIdentity().ID, func(ctx context.Context, u string) (model.Exchange, error) {
+			return client.Do(ctx, httpx.Request{Method: http.MethodGet, URL: u, Header: crawlHeaders()})
+		}}}
+		for _, ctl := range identities.Controls() {
+			if ok, _, _ := ctl.Usable(); !ok {
+				continue
+			}
+			ctl := ctl
+			actors = append(actors, struct {
+				name string
+				do   func(ctx context.Context, u string) (model.Exchange, error)
+			}{ctl.ID(), func(ctx context.Context, u string) (model.Exchange, error) {
+				return ctl.Do(ctx, http.MethodGet, u, crawlHeaders())
+			}})
+		}
+		for _, a := range actors {
+			a := a
+			res := discovery.Crawl(ctx, discovery.CrawlOptions{
+				Target: cfg.Target.BaseURL, Actor: a.name, MaxPages: pages, MaxDepth: depth, Skip: skip,
+				Fetch: func(ctx context.Context, u string) (discovery.Page, bool, error) {
+					ex, err := a.do(ctx, u)
+					if err != nil {
+						return discovery.Page{}, crawlMustStop(ctx, err), err
+					}
+					return discovery.Page{
+						Status: ex.Response.Status, ContentType: ex.Response.HeaderValue("Content-Type"),
+						Location: ex.Response.HeaderValue("Location"), Body: ex.Response.Body,
+					}, false, nil
+				},
+			})
+			var added int
+			surface.Operations, added, _ = discovery.MergeOperations(surface.Operations, res.Operations)
+			surface.CrawlAdded += added
+			surface.Crawls = append(surface.Crawls, res)
+		}
+		var found int
+		for _, c := range surface.Crawls {
+			found += len(c.Operations)
+		}
+		fmt.Fprintf(stderr, "sulayi: crawl: %d route(s) found as %d actor(s), %d new to the surface\n",
+			found, len(surface.Crawls), surface.CrawlAdded)
+
+		// When the crawl was the only way to the target and the target answered
+		// none of its requests, the target was unreachable — not an application
+		// with nothing on it.
+		var answered int
+		for _, c := range surface.Crawls {
+			answered += c.Responses
+		}
+		if answered == 0 && len(surface.Operations) == 0 && !surface.SpecDerived {
+			return fail(ExitAborted, "the target did not respond to any request, so nothing could be assessed")
+		}
+	}
+
+	// A GET route reached by link only while signed in, with no other
+	// expectation, is given an inferred one: it is probably meant to be
+	// protected. A finding against an inference is never confirmed, and is
+	// raised at all only when an anonymous caller receives what the signed-in
+	// one did.
+	surface.Operations, surface.NavigationInferred = inferFromNavigation(surface.Operations)
+
+	// The declared access policy is the oracle for routes no specification
+	// describes. It replaces navigation inferences, fills expectations nothing
+	// stated, and withdraws — and reports — any it contradicts.
+	accessPolicy, err := cfg.AccessPolicy()
+	if err != nil {
+		return fail(ExitUsage, "%v", err)
+	}
+	surface.Operations, surface.Access = accessPolicy.Apply(surface.Operations)
+	for _, c := range surface.Access.Conflicts {
+		fmt.Fprintf(stderr, "sulayi: access policy: %s\n", c.Detail)
+	}
+	surface.Fidelity = openapi.Grade(surface.Operations)
+
+	if len(surface.Operations) == 0 && !surface.SpecDerived {
+		fmt.Fprintln(stderr, "sulayi: no operation was found without a specification. Give one with "+
+			"--spec, a browser recording with --har, or a framework adapter in sulayi.yaml")
 	}
 
 	// One signal set for every check, so an operator-supplied error-code oracle
@@ -483,7 +620,11 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, st
 }
 
 // discover builds the attack surface.
-func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now func() time.Time) (engine.Surface, error) {
+// When specOptional is true — another source can supply a surface — a missing
+// specification is not an error: the run proceeds with what can be observed,
+// and says so.
+func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now func() time.Time,
+	specOptional bool) (engine.Surface, error) {
 	var raw []byte
 	var source model.Source
 
@@ -516,13 +657,24 @@ func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now 
 		// failure this project exists to prevent.
 		var scopeRefusal error
 		var parseFailure error
+		// Whether the target answered at all. A target that never responds is
+		// not one with no specification: every other source would fail the
+		// same way, and the run must say it could not reach it.
+		var responded bool
+		var unreachable error
 		for _, p := range openapi.WellKnownPaths() {
 			candidate := base + p
 			data, err := fetchSpec(ctx, client, candidate)
+			var status *specStatusError
+			if err == nil || errors.As(err, &status) {
+				responded = true
+			}
 			if err != nil {
 				var oos *httpx.ErrOutOfScope
 				if errors.As(err, &oos) && scopeRefusal == nil {
 					scopeRefusal = oos
+				} else if !errors.As(err, &status) && unreachable == nil {
+					unreachable = err
 				}
 				continue
 			}
@@ -557,6 +709,14 @@ func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now 
 					"  document:\n"+
 					"    sulayi attack <target> --spec ./openapi.json", parseFailure)
 		}
+		if raw == nil && !responded && scopeRefusal == nil && unreachable != nil {
+			return engine.Surface{}, fmt.Errorf("the target did not respond to any request, so nothing "+
+				"could be assessed: %v", unreachable)
+		}
+		if raw == nil && specOptional {
+			return engine.Surface{Warnings: []string{"no OpenAPI document was found, so the surface is " +
+				"what framework adapters, a browser recording and crawling could observe"}}, nil
+		}
 		if raw == nil {
 			return engine.Surface{}, fmt.Errorf(
 				"no OpenAPI document found.\n\n" +
@@ -567,6 +727,10 @@ func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now 
 					"    sulayi attack <target> --spec-url <target>/api/docs-json")
 		}
 	default:
+		if specOptional {
+			return engine.Surface{Warnings: []string{"no specification was configured, so the surface is " +
+				"what framework adapters, a browser recording and crawling could observe"}}, nil
+		}
 		return engine.Surface{}, fmt.Errorf("no specification configured and probing is disabled")
 	}
 
@@ -595,14 +759,21 @@ func fetchSpec(ctx context.Context, client *httpx.Client, rawURL string) ([]byte
 	if err != nil {
 		return nil, fmt.Errorf("cannot fetch specification: %w", err)
 	}
-	if ex.Response == nil || ex.Response.Status < 200 || ex.Response.Status > 299 {
-		status := 0
-		if ex.Response != nil {
-			status = ex.Response.Status
-		}
-		return nil, fmt.Errorf("specification request returned status %d", status)
+	if ex.Response == nil {
+		return nil, errors.New("the specification request got no response")
+	}
+	if ex.Response.Status < 200 || ex.Response.Status > 299 {
+		return nil, &specStatusError{status: ex.Response.Status}
 	}
 	return ex.Response.Body, nil
+}
+
+// specStatusError is a specification request the target answered with a
+// non-success status: it responded, and has no document there.
+type specStatusError struct{ status int }
+
+func (e *specStatusError) Error() string {
+	return fmt.Sprintf("specification request returned status %d", e.status)
 }
 
 func scopeStrings(p *scope.Policy) []string { return p.EntryStrings() }
@@ -709,4 +880,63 @@ func missingIn(creds *identity.EnvFile, names []string) int {
 		}
 	}
 	return n
+}
+
+// readBounded reads at most limit bytes of a file, refusing a larger one.
+func readBounded(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("the file exceeds %d bytes", limit)
+	}
+	return data, nil
+}
+
+func crawlHeaders() map[string][]string {
+	return map[string][]string{"Accept": {"text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"}}
+}
+
+// crawlMustStop reports whether a failed crawl request means the crawl must
+// end: the budget is spent, the run is cancelled or out of time.
+func crawlMustStop(ctx context.Context, err error) bool {
+	var spent *httpx.ErrBudgetExceeded
+	return errors.As(err, &spent) || ctx.Err() != nil
+}
+
+// inferFromNavigation gives an inferred expectation to each GET route that
+// signed-in crawling reached and anonymous crawling did not, when nothing else
+// stated one.
+func inferFromNavigation(ops []model.Operation) ([]model.Operation, int) {
+	out := make([]model.Operation, len(ops))
+	copy(out, ops)
+	var n int
+	for i := range out {
+		op := &out[i]
+		if op.Method != http.MethodGet || op.Security != nil {
+			continue
+		}
+		var signedIn, anonymous bool
+		for _, src := range op.Sources {
+			if src.Kind != model.SourceCrawl {
+				continue
+			}
+			if strings.HasPrefix(src.Ref, "crawl "+model.AnonymousIdentity().ID+" ") {
+				anonymous = true
+			} else {
+				signedIn = true
+			}
+		}
+		if signedIn && !anonymous {
+			op.Security = []model.SecurityRequirement{{Schemes: []string{model.SchemeAuthenticatedNavigation}}}
+			n++
+		}
+	}
+	return out, n
 }

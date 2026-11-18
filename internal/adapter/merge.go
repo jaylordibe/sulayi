@@ -276,7 +276,7 @@ func applyAuthentication(op *model.Operation, f Fact, doc Document, now func() m
 	switch f.Value {
 	case AuthenticationRequired:
 		op.Security = []model.SecurityRequirement{{
-			Schemes: []string{"adapter:" + doc.Adapter.Name},
+			Schemes: []string{model.SchemePrefixAdapter + doc.Adapter.Name},
 		}}
 	case AuthenticationPublic:
 		// An explicitly empty requirement list is how this model spells

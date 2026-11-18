@@ -64,6 +64,27 @@ const (
 	SourceHTML       SourceKind = "html"
 	SourceJavaScript SourceKind = "javascript"
 	SourceWellKnown  SourceKind = "well-known"
+
+	// Surface sources that need no specification.
+	SourceHAR          SourceKind = "har"
+	SourceCrawl        SourceKind = "crawl"
+	SourceAccessPolicy SourceKind = "access-policy"
+)
+
+// Expectation schemes record where an operation's authentication expectation
+// came from, in the scheme name of its SecurityRequirement.
+const (
+	// SchemeAccessPolicy is an expectation the operator declared in
+	// sulayi.yaml's access policy. Like a specification's, it is a statement of
+	// what should happen, and a finding against it can be confirmed — by the
+	// same verification as any other.
+	SchemeAccessPolicy = "access-policy"
+	// SchemePrefixAdapter marks an expectation a framework adapter inferred
+	// from source code.
+	SchemePrefixAdapter = "adapter:"
+	// SchemeAuthenticatedNavigation marks an expectation inferred from a route
+	// being reachable by link only while signed in.
+	SchemeAuthenticatedNavigation = "inferred:authenticated-navigation"
 )
 
 // Source records where a single fact came from, so a report can explain why
@@ -254,6 +275,40 @@ func (o Operation) DeclaresAuthRequired() bool {
 
 // DeclaresPublic reports whether the specification explicitly declared the
 // operation as requiring no authentication.
+// HasScheme reports whether any of the operation's security requirements
+// names scheme.
+func (o Operation) HasScheme(scheme string) bool {
+	for _, req := range o.Security {
+		for _, s := range req.Schemes {
+			if s == scheme {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// InferredExpectation reports whether the operation's expectation was inferred
+// rather than declared — by a framework adapter reading source, or from
+// navigation — and describes where it came from. A finding against an inferred
+// expectation is never confirmed: the inference may be wrong, and nobody
+// stated it.
+func (o Operation) InferredExpectation() (bool, string) {
+	for _, req := range o.Security {
+		for _, s := range req.Schemes {
+			switch {
+			case strings.HasPrefix(s, SchemePrefixAdapter):
+				return true, "the expectation was inferred by framework adapter " +
+					strings.TrimPrefix(s, SchemePrefixAdapter) + " from source code"
+			case s == SchemeAuthenticatedNavigation:
+				return true, "the expectation was inferred because the route was reached by link only " +
+					"while signed in"
+			}
+		}
+	}
+	return false, ""
+}
+
 func (o Operation) DeclaresPublic() bool {
 	return o.Security != nil && len(o.Security) == 0
 }
@@ -835,4 +890,25 @@ func SortOperations(ops []Operation) {
 		}
 		return ops[i].Method < ops[j].Method
 	})
+}
+
+// authPathHints match routes where an unauthenticated sweep risks locking real
+// accounts or burning one-time codes, and sign-out routes, where an
+// authenticated control request would end the very session the run depends on.
+var authPathHints = []string{
+	"login", "signin", "sign-in", "authenticate", "auth/token", "oauth",
+	"logout", "signout", "sign-out",
+	"register", "signup", "sign-up", "password", "forgot", "reset",
+	"verify", "otp", "mfa", "2fa", "token/refresh", "refresh-token",
+}
+
+// LooksLikeAuthRoute reports whether a path resembles an authentication route.
+func LooksLikeAuthRoute(path string) bool {
+	lower := strings.ToLower(path)
+	for _, hint := range authPathHints {
+		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+	return false
 }

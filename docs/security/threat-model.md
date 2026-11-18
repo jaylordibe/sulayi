@@ -978,8 +978,12 @@ its own root response, `robots.txt`, the JavaScript its root document references
 and five standardized metadata documents. Every one of them is written by the
 application being audited, which is to say by whoever controls it.
 
-**Nothing discovered is ever fetched.** This is the strongest statement in the
-whole feature and the one worth reading twice. Discovery makes requests to
+> **Since S2** this section describes the passive discovery sources only. The
+> bounded crawler, which does fetch what it finds, is a separate component with
+> its own rules in T-24 and [ADR-0021](../adr/0021-surface-without-a-specification.md).
+
+**Nothing discovered by these sources is ever fetched.** This is the strongest
+statement in the passive sources and the one worth reading twice. Discovery makes requests to
 exactly four things: the target's root (plus at most one same-origin redirect
 hop), `/robots.txt`, the same-origin scripts the root document names, and a fixed
 list of five well-known paths. A path or URL that discovery *finds* is recorded
@@ -1249,6 +1253,76 @@ the sweep by default: a login so accounts are not locked, a sign-out so an
 authenticated control request cannot end the session the run depends on.
 **TESTED** (`engine.TestSignOutRoutesAreExcludedByDefault`). A sign-out route
 whose path does not look like one belongs in `assessment.excludeOperations`.
+
+### T-24 Surface without a specification (S2)
+
+Without an OpenAPI document Sulayi finds routes by crawling, from a browser
+recording, or from a framework adapter's routing table, and takes its oracle
+from a declared access policy. Each is a way for target output to decide what
+Sulayi requests, and each would be an SSRF or a scope escape if it could reach
+beyond the target. See [ADR-0021](../adr/0021-surface-without-a-specification.md).
+
+- **The crawler stays on the target and changes nothing.** It requests GET only,
+  through the same scope-enforcing client as every check (an identity's through
+  its origin-bound control), on the target's own origin under its base path. It
+  follows links to a fixed depth and page count, records forms with the method
+  they declare and never submits them, executes no script, and records off-origin
+  links and redirects without following them. **TESTED**
+  (`discovery.TestCrawlStaysOnOriginAndNeverSubmitsOrSignsOut`,
+  `discovery.TestCrawlFollowsOnlySameOriginRedirects`,
+  `discovery.TestCrawlStaysUnderTheBasePath`).
+- **It never signs anyone out or touches a risky route.** Sign-out, login,
+  password, verification and other authentication routes, operations configured as
+  state-changing and excluded operations are never requested. **TESTED**
+  (`discovery.TestCrawlStaysOnOriginAndNeverSubmitsOrSignsOut`,
+  `cli.TestSpecLessRouteIsConfirmedAgainstADeclaredPolicy`, which links the crawler
+  to `/logout` and a POST form and asserts neither was requested).
+- **Its volume is bounded and its gaps are reported.** Pages, depth, the run's
+  request budget and its deadline all stop it, and a crawl that stopped says so in
+  the ledger statement and the terminal. **TESTED** (`discovery.TestCrawlLimitsAreReported`,
+  `discovery.TestCrawlStopsWhenTheBudgetIsSpent`).
+- **An SPA fallback is not a route.** A target that answers unknown paths like a
+  real page is fingerprinted first, and no such answer becomes an operation.
+  **TESTED** (`discovery.TestCrawlIgnoresTheSPAFallback`).
+- **A HAR is discovery input, never permission.** Only each entry's method and URL
+  are decoded; headers, cookies, bodies, responses and query strings are never read
+  into memory. Off-origin, asset and token-bearing entries are left out. Nothing is
+  replayed, nothing from the file is stored, and every operation it yields is
+  planned and gated like one from a specification — a recorded POST is not sent
+  under `standard`. **TESTED** (`discovery.TestHARYieldsOperationsAndNothingElse`,
+  `discovery.TestHARRespectsTheTargetsBasePath`, `discovery.TestMalformedHARIsRefusedWithoutEchoingIt`,
+  `cli.TestHARIsDiscoveryOnly`, which records secrets in every part of a HAR and
+  searches every file under `.sulayi/`).
+- **A method is never guessed.** An operation exists only when a source
+  establishes its method: a link (GET), a form's declared method, a recorded
+  request, a routing table. A path seen without one stays an untested ledger row.
+  **TESTED** (`discovery.TestCrawlStaysOnOriginAndNeverSubmitsOrSignsOut`).
+- **A declared policy is an expectation, not evidence.** It makes a route
+  confirmable only through the existing authenticated-control verification; where
+  it contradicts the specification or an adapter, neither is used and the
+  disagreement is reported. A route's name is never evidence. **TESTED**
+  (`access.TestApplyDeclaresCorroboratesAndReportsConflicts`,
+  `access.TestNoPolicyDeclaresNothing`, `access.TestPatternsMatchWholeSegments`,
+  `access.TestMalformedPatternsAreRejected`,
+  `cli.TestSpecLessRouteIsConfirmedAgainstADeclaredPolicy`).
+- **An inference never confirms.** An expectation inferred from an adapter or from
+  a route being reachable only while signed in caps its finding at suspected, and
+  a navigation inference raises nothing unless the anonymous caller received what
+  the signed-in one did — a login page or a "please sign in" document is not a
+  vulnerability. **TESTED** (`evals.TestM3_AdapterExpectationStaysSuspectedEvenWithAMatchingControl`,
+  `cli.TestSpecLessRouteWithoutPolicyIsOnlySuspected`, which fails if that guard is
+  removed).
+- **Nothing found is not a clean result.** A spec-less run that finds no operation
+  exits 3 and says how to give it a surface; a target that answers no request at all
+  aborts with exit 4, because every other source would fail the same way. **TESTED**
+  (`cli.TestNoSpecificationAndNothingFoundEstablishesNothing`,
+  `cli.TestAdapterAloneIsASurface`, `cli.TestUnreachableTargetAborts`).
+
+**Limits.** The crawler reads server-rendered links; a single-page application
+that renders its navigation in JavaScript yields little to it, and a HAR is the
+way to give Sulayi that application's API. Navigation inference depends on the
+anonymous crawl not reaching a route; an application that links everything from
+public pages gives it nothing to infer.
 
 ## 3. Residual risk accepted at this stage
 

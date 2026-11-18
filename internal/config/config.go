@@ -25,6 +25,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/jaylordibe/sulayi/internal/access"
 	"github.com/jaylordibe/sulayi/internal/adapter"
 	"github.com/jaylordibe/sulayi/internal/discovery"
 	"github.com/jaylordibe/sulayi/internal/identity"
@@ -82,6 +83,7 @@ type Config struct {
 	Adapters    Adapters    `yaml:"adapters"`
 	Engines     Engines     `yaml:"engines"`
 	Discovery   Discovery   `yaml:"discovery"`
+	Access      Access      `yaml:"access"`
 	Outcome     Outcome     `yaml:"outcome"`
 	Environment Environment `yaml:"environment"`
 	Policy      Policy      `yaml:"policy"`
@@ -418,6 +420,30 @@ type Discovery struct {
 	// Surface configures discovery of paths the specification does not
 	// describe.
 	Surface SurfaceDiscovery `yaml:"surface"`
+	// Crawl is the bounded, same-origin, GET-only crawler that finds routes
+	// without a specification.
+	Crawl CrawlDiscovery `yaml:"crawl"`
+}
+
+// CrawlDiscovery configures the crawler. It runs as the anonymous caller and
+// as each signed-in identity.
+type CrawlDiscovery struct {
+	// Enabled defaults to true: an application with no specification is
+	// otherwise invisible.
+	Enabled *bool `yaml:"enabled"`
+	// MaxPages bounds the pages fetched per identity. Default 50.
+	MaxPages int `yaml:"maxPages"`
+	// MaxDepth bounds how many links from the root are followed. Default 3.
+	MaxDepth int `yaml:"maxDepth"`
+}
+
+// Access is the operator's declared access policy: which routes require
+// authentication and which are public. It is the oracle for routes no
+// specification describes, and a statement of expected behaviour — never
+// evidence. Public patterns are exceptions to protected ones.
+type Access struct {
+	Protected []string `yaml:"protected"`
+	Public    []string `yaml:"public"`
 }
 
 // SurfaceDiscovery configures the discovery of undocumented surface.
@@ -612,6 +638,22 @@ func (c *Config) Validate() error {
 	if c.Assessment.LegacyAuthorizeIntrusive != nil {
 		problems = append(problems, "assessment.authorizeIntrusive was removed: the aggressive profile is "+
 			"authorized by target.disposable: true and a confirmation naming the target")
+	}
+	for i, pat := range c.Access.Protected {
+		if err := access.Validate(pat); err != nil {
+			problems = append(problems, fmt.Sprintf("access.protected[%d]: %v", i, err))
+		}
+	}
+	for i, pat := range c.Access.Public {
+		if err := access.Validate(pat); err != nil {
+			problems = append(problems, fmt.Sprintf("access.public[%d]: %v", i, err))
+		}
+	}
+	if p := c.Discovery.Crawl.MaxPages; p != 0 && (p < 1 || p > 1000) {
+		problems = append(problems, "discovery.crawl.maxPages must be between 1 and 1000")
+	}
+	if d := c.Discovery.Crawl.MaxDepth; d != 0 && (d < 1 || d > 10) {
+		problems = append(problems, "discovery.crawl.maxDepth must be between 1 and 10")
 	}
 	for i, id := range c.Assessment.StateChangingOperations {
 		method, path, ok := strings.Cut(strings.TrimSpace(id), " ")
@@ -1074,4 +1116,28 @@ func targetEntry(u *url.URL) scope.Entry {
 		}
 	}
 	return e
+}
+
+// CrawlEnabled reports whether the crawler runs. It defaults to on: without
+// it, an application with no specification has no surface at all.
+func (c Config) CrawlEnabled() bool {
+	return c.Discovery.Crawl.Enabled == nil || *c.Discovery.Crawl.Enabled
+}
+
+// CrawlLimits returns the crawler's page and depth limits.
+func (c Config) CrawlLimits() (pages, depth int) {
+	pages, depth = c.Discovery.Crawl.MaxPages, c.Discovery.Crawl.MaxDepth
+	if pages == 0 {
+		pages = discovery.DefaultCrawlPages
+	}
+	if depth == 0 {
+		depth = discovery.DefaultCrawlDepth
+	}
+	return pages, depth
+}
+
+// AccessPolicy compiles the declared access policy. Validate has already
+// checked every pattern.
+func (c Config) AccessPolicy() (*access.Policy, error) {
+	return access.New(c.Access.Protected, c.Access.Public)
 }

@@ -141,16 +141,16 @@ func (AuthRequired) RequiredProfile(op model.Operation) model.Profile {
 func (c AuthRequired) Applicable(op model.Operation) (bool, model.BlockedCause, string) {
 	if op.Security == nil {
 		return false, model.CauseNoOracle,
-			"the specification states no security requirement for this operation, so there is " +
-				"nothing to test it against"
+			"nothing states a security requirement for this operation — no specification, access " +
+				"policy or framework adapter covers it — so there is nothing to test it against"
 	}
 	if op.DeclaresPublic() {
 		return false, model.CauseNoOracle,
-			"the specification declares this operation public, so an unauthenticated success is expected"
+			expectationSource(op) + " declares this operation public, so an unauthenticated success is expected"
 	}
 	if !op.DeclaresAuthRequired() {
 		return false, model.CauseNoOracle,
-			"the specification makes authentication optional for this operation, so an " +
+			expectationSource(op) + " makes authentication optional for this operation, so an " +
 				"unauthenticated success is correct behaviour"
 	}
 	if params := op.RequiredPathParams(); len(params) > 0 {
@@ -413,9 +413,32 @@ func (c AuthRequired) Run(ctx context.Context, op model.Operation) Result {
 	ctrl := c.authenticatedControl(ctx, op, primary.Response, &exchanges)
 	steps = append(steps, ctrl.step)
 
+	// An expectation nobody declared can raise at most a suspicion. One
+	// inferred from navigation alone — the route appeared only while signed in
+	// — raises nothing unless the anonymous caller received what the signed-in
+	// one did: a login page, an SPA shell or a public page served with 200 is
+	// otherwise exactly what such a route returns, and is not a vulnerability.
+	inferred, inferredFrom := op.InferredExpectation()
+	if inferred && !ctrl.equivalent && op.HasScheme(model.SchemeAuthenticatedNavigation) {
+		return Result{
+			Disposition: model.DispositionExecuted,
+			Detail: "the route was reached only while signed in and serves anonymous requests, but " +
+				"the anonymous response is not materially equivalent to the signed-in one, and no " +
+				"access policy declares it protected, so nothing is reported",
+			Exchanges: exchanges,
+		}
+	}
+
 	title := "Operation declared as requiring authentication is served without credentials"
 	expected := "the specification declares this operation requires authentication, so an " +
 		"unauthenticated request should be refused"
+	switch {
+	case op.HasScheme(model.SchemeAccessPolicy):
+		expected = "the access policy in sulayi.yaml declares this route protected, so an " +
+			"unauthenticated request should be refused"
+	case inferred:
+		expected = inferredFrom + ", so an unauthenticated request was expected to be refused"
+	}
 	actualDetail := fmt.Sprintf("the operation returned %d to a request carrying no credentials, twice",
 		primary.Response.Status)
 	switch {
@@ -433,7 +456,7 @@ func (c AuthRequired) Run(ctx context.Context, op model.Operation) Result {
 	confidence := model.ConfidenceMedium
 	result := "the operation served an unauthenticated request and no discriminator explained it away"
 	strategy := "unauthenticated-probe-with-catch-all-cache-and-repetition-discriminators"
-	if ctrl.equivalent {
+	if ctrl.equivalent && !inferred {
 		state = model.StateConfirmed
 		confidence = model.ConfidenceHigh
 		result = "an unauthenticated request received a response materially equivalent to the one an " +
@@ -454,6 +477,11 @@ func (c AuthRequired) Run(ctx context.Context, op model.Operation) Result {
 		// omitted. An absent authenticated control caps confidence; it never
 		// silently raises it.
 		Unavailable: unavailable(baseline.established, credentialProbeInconclusive, ctrl.unavailable),
+	}
+	if inferred {
+		verification.Unavailable = append(verification.Unavailable, "declared-expectation: "+inferredFrom+
+			"; nobody declared it, so the finding stays suspected however the requests agree. Declare "+
+			"the route in the specification or in sulayi.yaml's access policy to make it confirmable")
 	}
 
 	finding := &model.Finding{
@@ -878,4 +906,28 @@ func (c AuthRequired) authenticatedControl(
 			Detail: "compared against identity " + identityID + ": " + eq.Reason,
 		},
 	}
+}
+
+// expectationSource names what stated an operation's expectation, for a
+// ledger reader: the specification, the access policy or a framework adapter.
+func expectationSource(op model.Operation) string {
+	has := func(kinds ...model.SourceKind) bool {
+		for _, src := range op.Sources {
+			for _, k := range kinds {
+				if src.Kind == k {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	switch {
+	case has(model.SourceAccessPolicy):
+		return "the access policy"
+	case has(model.SourceOpenAPIFile, model.SourceOpenAPIURL):
+		return "the specification"
+	case has(model.SourceAdapter):
+		return "a framework adapter"
+	}
+	return "the specification"
 }

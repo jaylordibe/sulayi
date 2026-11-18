@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jaylordibe/sulayi/internal/access"
 	"github.com/jaylordibe/sulayi/internal/adapter"
 	"github.com/jaylordibe/sulayi/internal/check"
 	"github.com/jaylordibe/sulayi/internal/discovery"
@@ -107,6 +108,23 @@ type Surface struct {
 	// AdapterDiscovered names operations an adapter found outside the
 	// specification that were adopted into the assessed surface.
 	AdapterDiscovered []string
+
+	// HAR is what a browser recording contributed, when one was given. It is
+	// discovery input only: nothing in it was replayed.
+	HAR *discovery.HARResult
+	// HARAdded and HARCorroborated count the recording's operations that were
+	// new to the surface and that matched an operation it already had.
+	HARAdded, HARCorroborated int
+	// Crawls are what the crawler found as each actor — the anonymous caller
+	// and each signed-in identity — and what it could not do.
+	Crawls []discovery.CrawlResult
+	// CrawlAdded counts operations the crawler added to the surface.
+	CrawlAdded int
+	// NavigationInferred counts routes given an inferred expectation because
+	// they were reached by link only while signed in.
+	NavigationInferred int
+	// Access is what the declared access policy did to the surface.
+	Access access.Applied
 }
 
 // Environment records operator-stated differences from production.
@@ -292,16 +310,6 @@ func (l *ledger) add(e model.CoverageEntry) {
 	l.entries = append(l.entries, e)
 }
 
-// authPathHints match routes where an unauthenticated sweep risks locking real
-// accounts or burning one-time codes, and sign-out routes, where an
-// authenticated control request would end the very session the run depends on.
-var authPathHints = []string{
-	"login", "signin", "sign-in", "authenticate", "auth/token", "oauth",
-	"logout", "signout", "sign-out",
-	"register", "signup", "sign-up", "password", "forgot", "reset",
-	"verify", "otp", "mfa", "2fa", "token/refresh", "refresh-token",
-}
-
 // Run executes an assessment.
 func Run(ctx context.Context, opts Options) (Result, error) {
 	if opts.Now == nil {
@@ -382,7 +390,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			// real accounts out, so the fail-safe direction is to skip when
 			// either form looks like an authentication route.
 			if opts.ExcludeAuthEndpoints &&
-				(looksLikeAuthRoute(op.PathTemplate) || looksLikeAuthRoute(op.AbsolutePath())) {
+				(model.LooksLikeAuthRoute(op.PathTemplate) || model.LooksLikeAuthRoute(op.AbsolutePath())) {
 				base.Disposition = model.DispositionUntested
 				base.Cause = model.CauseSafetyPolicy
 				base.Detail = "skipped because the path looks like an authentication or sign-out route; " +
@@ -691,17 +699,6 @@ func sortResult(r *Result) {
 // across runs, which consumers rely on for deduplication.
 func findingID(checkID, operationID string) string {
 	return checkID + ":" + operationID
-}
-
-// looksLikeAuthRoute reports whether a path resembles an authentication route.
-func looksLikeAuthRoute(path string) bool {
-	lower := strings.ToLower(path)
-	for _, hint := range authPathHints {
-		if strings.Contains(lower, hint) {
-			return true
-		}
-	}
-	return false
 }
 
 // assessedClasses maps a check to the weakness classes it covers.

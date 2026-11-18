@@ -256,6 +256,9 @@ type Surface struct {
 	Warnings       []string `json:"warnings,omitempty"`
 	// Discovery accounts for surface the specification does not describe.
 	Discovery DiscoveryAccount `json:"discovery"`
+	// Sources says where a surface came from when it is not, or not only, a
+	// specification: a browser recording, crawling, and the access policy.
+	Sources SurfaceSources `json:"sources"`
 }
 
 // DiscoveryAccount is what discovery of undocumented surface established.
@@ -439,6 +442,7 @@ func Build(res engine.Result, version string) Document {
 		},
 		Surface: Surface{
 			SpecDerived: res.Surface.SpecDerived,
+			Sources:     surfaceSources(res.Surface),
 			Source: Source{
 				Kind:       string(res.Surface.SpecSource.Kind),
 				Ref:        res.Surface.SpecSource.Ref,
@@ -756,7 +760,32 @@ func authenticatedControlStatement(res engine.Result) string {
 func surfaceCompletenessStatement(res engine.Result) string {
 	sf := res.Surface
 	if !sf.SpecDerived {
-		return "No specification was available, so no attack surface was enumerated."
+		if len(sf.Operations) == 0 {
+			return "No specification was available and no other source found an operation, so no " +
+				"attack surface was enumerated."
+		}
+		var parts []string
+		if n := len(sf.AdapterDiscovered); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d from framework adapters", n))
+		}
+		if sf.HARAdded > 0 {
+			parts = append(parts, fmt.Sprintf("%d from a browser recording", sf.HARAdded))
+		}
+		if sf.CrawlAdded > 0 {
+			parts = append(parts, fmt.Sprintf("%d from crawling", sf.CrawlAdded))
+		}
+		incomplete := ""
+		for _, c := range sf.Crawls {
+			if c.Incomplete {
+				incomplete = " The crawl stopped at a limit, so even that is a floor."
+				break
+			}
+		}
+		return fmt.Sprintf("No specification was available. The %d operation(s) in this ledger were "+
+			"assembled from what could be observed — %s — so coverage is relative to what those "+
+			"sources revealed, not to the application: a route no adapter, recording or link "+
+			"reveals was not found and was not tested.%s", len(sf.Operations), strings.Join(parts, ", "),
+			incomplete)
 	}
 
 	ran := len(sf.DiscoveryAttempts) > 0
@@ -891,8 +920,47 @@ func Summary(doc Document) string {
 	b.WriteString("Sulayi assessment " + doc.Run.ID + "\n")
 	b.WriteString("  target:   " + doc.Run.Target + "\n")
 	b.WriteString("  profile:  " + doc.Run.Profile + "\n")
-	b.WriteString("  surface:  " + strconv.Itoa(doc.Surface.OperationCount) + " operations from " +
-		doc.Surface.Source.Kind + "\n")
+	surfaceFrom := doc.Surface.Source.Kind
+	if !doc.Surface.SpecDerived {
+		var from []string
+		if doc.Surface.Sources.HAR != nil {
+			from = append(from, "a browser recording")
+		}
+		if len(doc.Surface.Sources.Crawls) > 0 {
+			from = append(from, "crawling")
+		}
+		if len(doc.Surface.Discovery.AdapterOperations) > 0 {
+			from = append(from, "framework adapters")
+		}
+		surfaceFrom = "no specification"
+		if len(from) > 0 {
+			surfaceFrom += "; found by " + strings.Join(from, ", ")
+		}
+	}
+	if doc.Surface.SpecDerived {
+		b.WriteString("  surface:  " + strconv.Itoa(doc.Surface.OperationCount) + " operations from " +
+			surfaceFrom + "\n")
+	} else {
+		b.WriteString("  surface:  " + strconv.Itoa(doc.Surface.OperationCount) + " operations (" +
+			surfaceFrom + ")\n")
+	}
+	for _, c := range doc.Surface.Sources.Crawls {
+		line := fmt.Sprintf("  crawl:    as %s, %d page(s), %d route(s)", c.Actor, c.Pages, c.Operations)
+		if c.Fallback {
+			line += "; unknown paths are answered like real pages, so those answers were not counted"
+		}
+		if c.Incomplete {
+			line += " — INCOMPLETE: a limit was reached"
+		}
+		b.WriteString(line + "\n")
+	}
+	if a := doc.Surface.Sources.Access; a.Declared+a.Corroborated+len(a.Conflicts) > 0 {
+		b.WriteString(fmt.Sprintf("  access:   policy declared %d route(s), agreed with %d, conflicted with %d\n",
+			a.Declared, a.Corroborated, len(a.Conflicts)))
+	}
+	if n := doc.Surface.Sources.NavigationInferred; n > 0 {
+		b.WriteString(fmt.Sprintf("  inferred: %d route(s) reached only while signed in; findings on them stay suspected\n", n))
+	}
 	b.WriteString("  oracle:   " + doc.Surface.Oracle.Level + " (" + doc.Surface.Oracle.Provenance + ")\n")
 	b.WriteString("\n")
 	b.WriteString("  executed: " + strconv.Itoa(doc.Assurance.ExecutedChecks) + "\n")
@@ -1145,6 +1213,73 @@ func intervals(ws []identity.Window) []Interval {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// SurfaceSources accounts for every source of surface beyond a specification.
+type SurfaceSources struct {
+	HAR    *HARAccount    `json:"har,omitempty"`
+	Crawls []CrawlAccount `json:"crawls,omitempty"`
+	// NavigationInferred counts routes reached by link only while signed in
+	// and given an inferred expectation; findings against them stay suspected.
+	NavigationInferred int           `json:"navigationInferred"`
+	Access             AccessAccount `json:"access"`
+}
+
+// HARAccount is what a browser recording contributed. Nothing in it was
+// replayed or stored; only methods and paths were read.
+type HARAccount struct {
+	Entries      int  `json:"entries"`
+	Operations   int  `json:"operations"`
+	Added        int  `json:"added"`
+	Corroborated int  `json:"corroborated"`
+	OffOrigin    int  `json:"offOrigin"`
+	Assets       int  `json:"assets"`
+	TokenBearing int  `json:"tokenBearing"`
+	Skipped      int  `json:"skipped"`
+	Truncated    bool `json:"truncated"`
+}
+
+// CrawlAccount is one crawl, as one actor.
+type CrawlAccount struct {
+	Actor       string   `json:"actor"`
+	Pages       int      `json:"pages"`
+	Operations  int      `json:"operations"`
+	OffOrigin   int      `json:"offOrigin"`
+	Skipped     int      `json:"skipped"`
+	Forms       int      `json:"forms"`
+	Fallback    bool     `json:"fallbackDetected"`
+	Incomplete  bool     `json:"incomplete"`
+	Limitations []string `json:"limitations,omitempty"`
+}
+
+// AccessAccount is what the declared access policy did.
+type AccessAccount struct {
+	Declared     int      `json:"declared"`
+	Corroborated int      `json:"corroborated"`
+	Conflicts    []string `json:"conflicts,omitempty"`
+}
+
+func surfaceSources(sf engine.Surface) SurfaceSources {
+	out := SurfaceSources{NavigationInferred: sf.NavigationInferred}
+	if h := sf.HAR; h != nil {
+		out.HAR = &HARAccount{
+			Entries: h.Entries, Operations: len(h.Operations), Added: sf.HARAdded,
+			Corroborated: sf.HARCorroborated, OffOrigin: h.OffOrigin, Assets: h.Assets,
+			TokenBearing: h.Sensitive, Skipped: h.Skipped, Truncated: h.Truncated,
+		}
+	}
+	for _, c := range sf.Crawls {
+		out.Crawls = append(out.Crawls, CrawlAccount{
+			Actor: c.Actor, Pages: c.Pages, Operations: len(c.Operations), OffOrigin: c.OffOrigin,
+			Skipped: c.Skipped, Forms: c.Forms, Fallback: c.Fallback, Incomplete: c.Incomplete,
+			Limitations: c.Limitations,
+		})
+	}
+	out.Access = AccessAccount{Declared: sf.Access.Declared, Corroborated: sf.Access.Corroborated}
+	for _, c := range sf.Access.Conflicts {
+		out.Access.Conflicts = append(out.Access.Conflicts, c.Detail)
 	}
 	return out
 }

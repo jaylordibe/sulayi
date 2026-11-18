@@ -56,7 +56,9 @@ consumer can detect a change rather than misparse.
   only through the HTTP client's authentication path.
 - **`--env <file>`** on `attack` and `doctor`: a credentials file from which only the
   names `sulayi.yaml` references are read, held in memory and never exported. A file git
-  tracks is refused; an unignored or loosely permissioned one is warned about.
+  tracks is refused; an unignored or loosely permissioned one is warned about. `${NAME}`
+  expands from the shell or an earlier line, as other dotenv loaders do; there is no
+  command substitution.
 - **Bounded re-authentication**: a login identity signs in again when its canary answers
   401 or 419, at most three times a run, one at a time; the failed request is never
   replayed, and results from every dead interval are withdrawn.
@@ -66,8 +68,30 @@ consumer can detect a change rather than misparse.
   default, so an authenticated control request cannot end the run's session.
 - Reference-application login configurations in `evals/reference/`, run by the
   reference workflow against the seeded accounts of both starters.
+- **Assessment without an OpenAPI document** ([ADR-0021](docs/adr/0021-surface-without-a-specification.md)):
+  a specification is now one source of surface among framework adapters (whose routing
+  table is the whole surface when there is no specification), `--har` browser recordings
+  (discovery only: methods and paths are read, nothing is replayed or stored), and a
+  bounded same-origin GET crawler (`discovery.crawl`, on by default) that runs as the
+  anonymous caller and each signed-in identity, never submits a form, runs no script and
+  never requests a sign-out or other authentication route.
+- **Declared access policy** (`access.protected` / `access.public` path patterns): the
+  oracle for routes no specification describes, confirmable only through the existing
+  verification; conflicts with the specification or an adapter are reported.
+- A GET route reached by link only while signed in is given an inferred expectation;
+  findings on it are suspected, and are raised only when an anonymous caller receives what
+  the signed-in one did.
+- The report's `surface.sources` and the terminal summary account for the recording, each
+  crawl, the access policy and inferred routes.
 
 ### Fixed
+
+- Findings against an expectation a framework adapter inferred could be confirmed,
+  contrary to the documented rule; they now stay suspected.
+- Operations adopted from a framework adapter had no base URL, so every check against
+  them was refused by scope and they were never tested.
+- A `${NAME}` reference in a `--env` file was sent literally, so the Laravel starter's
+  seeded accounts could not sign in.
 
 - A scope `pathPrefix` could be escaped with dot segments, encoded dot segments or a
   sibling prefix (`/apiv2` under `/api`).

@@ -76,6 +76,23 @@ jobs:
             jq '.identities | map({id, role, usable, liveness, problem})' "$report"
             exit 1; }
 
+      - name: assess it without its specification
+        # The spec-less path: the Laravel adapter's routing table and the crawl
+        # are the surface, the access policy is the oracle. Operations must be
+        # executed, from a surface that is not specification-derived.
+        run: |
+          go build -o sulayi ./cmd/sulayi
+          go build -o dist/sulayi-adapter-laravel ./adapters/laravel
+          sed "s|@SOURCE_ROOT@|$RUNNER_TEMP/laravel-api|" \
+            evals/reference/laravel-api-starter.specless.sulayi.yaml > "$RUNNER_TEMP/specless.yaml"
+          ./sulayi attack -c "$RUNNER_TEMP/specless.yaml" --no-probe \
+            --env "$RUNNER_TEMP/laravel-api/.env" -o "$RUNNER_TEMP/specless-run" || true
+          report=$(ls "$RUNNER_TEMP"/specless-run/runs/*/report.json)
+          jq -e '.surface.specDerived == false and .assurance.executedChecks > 0' "$report" || {
+            echo "::error::the spec-less assessment executed nothing"
+            jq '{surface: .surface.sources, assurance: .assurance}' "$report"
+            exit 1; }
+
       - name: end-to-end through the CLI an operator would run
         run: |
           go build -o sulayi ./cmd/sulayi

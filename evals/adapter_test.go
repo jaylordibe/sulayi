@@ -19,6 +19,7 @@ import (
 	"github.com/jaylordibe/sulayi/internal/check"
 	"github.com/jaylordibe/sulayi/internal/engine"
 	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/identity"
 	"github.com/jaylordibe/sulayi/internal/model"
 	"github.com/jaylordibe/sulayi/internal/openapi"
 	"github.com/jaylordibe/sulayi/internal/redact"
@@ -377,5 +378,59 @@ func TestM3_ReportKeepsExpectationSeparateFromEvidence(t *testing.T) {
 	}
 	if _, ok := parsed["adapters"]; !ok {
 		t.Error("the report has no adapters section, so a reader cannot tell how expectations arose")
+	}
+}
+
+// The same property with the control that could confirm it actually present.
+// An identity receives exactly what the anonymous caller received, which is
+// what confirms a finding against a declared expectation — but this one was
+// inferred from source, so it must stay suspected and say why.
+func TestM3_AdapterExpectationStaysSuspectedEvenWithAMatchingControl(t *testing.T) {
+	srv := httptest.NewServer(servesEveryone())
+	t.Cleanup(srv.Close)
+	pol, err := scope.New([]scope.Entry{{Host: "127.0.0.1", Ports: []int{serverPort(t, srv.URL)}}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	red := redact.New()
+	client, err := httpx.New(httpx.Options{Policy: pol, Redactor: red, Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.Close)
+	t.Setenv("SULAYI_EVAL_M3_TOKEN", "m3-token-0123456789abcdef")
+	ids := identity.Resolve([]identity.Identity{{
+		ID: "alice", Auth: identity.Authentication{Scheme: identity.SchemeBearer,
+			Credential: identity.CredentialSource{Env: "SULAYI_EVAL_M3_TOKEN"}},
+	}}, srv.URL, client, red)
+
+	parsed, err := openapi.Parse([]byte(silentSpec), srv.URL,
+		model.Source{Kind: model.SourceOpenAPIFile, Ref: "fixture", ObservedAt: time.Unix(0, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := adapter.MergeInto(parsed.Operations, []adapter.Document{adapterDoc(authRequiredFact())}, nil)
+
+	res, err := engine.Run(context.Background(), engine.Options{
+		RunID: "eval-m3-control", Target: srv.URL, Profile: model.ProfileStandard,
+		Surface: engine.Surface{SpecDerived: true, Operations: merged.Operations},
+		Checks: []engine.Check{check.AuthRequired{
+			Client: client, BaselineProbes: 2, Control: ids.Primary(),
+		}},
+		Identities:  ids,
+		Concurrency: 1, RequestsPerSecond: 500,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.State != model.StateSuspected {
+		t.Fatalf("state = %s; an adapter-inferred expectation must never confirm", f.State)
+	}
+	if !strings.Contains(strings.Join(f.Verification.Unavailable, " "), "inferred by framework adapter") {
+		t.Errorf("the finding does not say why it is not confirmed: %v", f.Verification.Unavailable)
 	}
 }

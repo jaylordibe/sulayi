@@ -20,8 +20,9 @@ request it sends.
 
 > [!IMPORTANT]
 > **Sulayi is early-stage (v0.x, unreleased).** Today it tests authentication and
-> object-level authorization on APIs that publish an OpenAPI document, signing in as your
-> test accounts. Injection testing and crawling are planned, not built. See [Status](#status).
+> object-level authorization, signing in as your test accounts, on applications with or
+> without an OpenAPI document. Injection and misconfiguration testing are planned, not
+> built. See [Status](#status).
 
 ---
 
@@ -41,8 +42,8 @@ request it sends.
 
 ## Quick start
 
-**Requirements:** Go 1.27.4 or newer, and an application that serves an OpenAPI 3.x document
-(or a copy of one on disk).
+**Requirements:** Go 1.27.4 or newer, and a running application. An OpenAPI document
+helps but is not required.
 
 ```bash
 go install github.com/jaylordibe/sulayi/cmd/sulayi@latest
@@ -54,12 +55,14 @@ Start your application, then:
 sulayi attack http://localhost:3000
 ```
 
-Sulayi looks for the specification at common paths such as `/openapi.json`,
-`/api/docs-json` and `/v3/api-docs`. If yours lives elsewhere, say so:
+Sulayi looks for an OpenAPI document at common paths such as `/openapi.json`,
+`/api/docs-json` and `/v3/api-docs`, and crawls your app's own pages either way. Point it
+at a specification if it lives elsewhere, or at a browser recording of a single-page app:
 
 ```bash
 sulayi attack http://localhost:3000 --spec ./openapi.json
 sulayi attack http://localhost:3000 --spec-url http://localhost:3000/docs/api.json
+sulayi attack http://localhost:3000 --har ./app.har     # DevTools → Network → Save all as HAR
 ```
 
 A real run against a small app whose admin endpoint forgot its authentication check:
@@ -97,17 +100,18 @@ compare against. [Add identities](#identities) and the same defect can be confir
 ```text
  target URL ──► discover ──► plan ──► attack ──► verify ──► report
                    │           │         │          │          │
-            OpenAPI document   │   every request    │    JSON, SARIF,
-            + framework        │   through one      │    coverage ledger,
-            adapters           │   safety-enforcing │    request log
+            OpenAPI, adapters, │   every request    │    JSON, SARIF,
+            HAR, bounded crawl │   through one      │    coverage ledger,
+                               │   safety-enforcing │    request log
                                │   HTTP client      │
                  profile gate, scope,      authenticated control
                  request budget            requests, owner re-reads
 ```
 
-1. **Discover.** The attack surface comes from the application's OpenAPI document, plus
-   optional framework adapters (Laravel, NestJS) that read your source without executing
-   it.
+1. **Discover.** The attack surface comes from whatever is available: an OpenAPI document,
+   framework adapters (Laravel, NestJS) that read your source without executing it, a
+   browser recording, and a bounded crawl of your app as each test account. None of them is
+   required, and no source may guess an HTTP method.
 2. **Plan.** Every operation is matched to the checks that apply to it. Anything that is
    not tested gets a ledger row saying why — no oracle, missing resource, safety policy,
    out of budget.
@@ -136,7 +140,7 @@ compare against. [Add identities](#identities) and the same defect can be confir
 | Nuclei and ZAP integrations | Built, **currently blocked** (see [Safety](#safety)) |
 | Signing in through the app's own login: bearer token or cookie session (with CSRF), `--env` credentials files, roles, bounded re-authentication | Implemented — bearer logins are run against the Laravel Passport and NestJS JWT reference starters by the reference workflow; cookie sessions and CSRF are tested on local fixtures only |
 | Testing across roles (function-level authorization) | Planned |
-| Testing applications without an OpenAPI document (crawling) | Planned |
+| Testing applications without an OpenAPI document: framework adapters, browser recordings (HAR, discovery only) and a bounded same-origin crawler, with a declared access policy as the oracle | Implemented — the crawler reads server-rendered links only; a single-page app's API comes from a HAR |
 | Injection and misconfiguration checks | Planned |
 | `sulayi report`, `sulayi verify <finding-id>` | Planned |
 
@@ -162,6 +166,7 @@ sulayi version        # version, Go toolchain and platform
 | `-c, --config <file>` | configuration file (default `./sulayi.yaml` if present) |
 | `-o, --output <dir>` | run output directory (default `.sulayi`) |
 | `--env <file>` | credentials file of `NAME=value` lines; only names `sulayi.yaml` references are read |
+| `--har <file>` | browser recording used only to find routes; nothing in it is replayed or stored |
 | `--yes` | confirm `aggressive` where there is no terminal; changes nothing else |
 
 ### Exit codes
@@ -236,6 +241,25 @@ sulayi attack http://localhost:3000 --env .env.sulayi.local
   `credential: { env: NAME }` or `{ file: path }`.
 
 Use dedicated, minimally privileged test accounts.
+
+### Without a specification
+
+Sulayi crawls your app — GET only, on its own origin, to a fixed depth — as an anonymous
+visitor and as each test account, and can read a browser recording (`--har`) or a
+framework adapter's routing table. It never submits a form, never runs your JavaScript, and
+never requests a sign-out route.
+
+To make findings confirmable, say which routes should require authentication:
+
+```yaml
+access:
+  protected: ["/api/**", "/dashboard"]     # * is one segment, a trailing ** any number
+  public: ["/api/health", "/api/auth/**"]  # exceptions to the protected list
+```
+
+A declared policy states what should happen; a finding against it still has to be proven
+by the usual verification. Without one, a route reachable only while signed in that serves
+anonymous callers the same thing is reported as **suspected**, never confirmed.
 
 ### Owned resources
 
@@ -344,9 +368,9 @@ Sulayi is pre-1.0 and has no published release. Output schemas may change.
   real-binary integration tests for the engines. Precision and recall on real applications have **not** been
   measured, so no detection-quality claim is made.
 - **Platforms:** CI builds and tests on Linux, macOS and Windows.
-- **Next:** testing applications without an OpenAPI document, then authorization testing
-  across roles, then injection and misconfiguration checks, each with runtime
-  verification. Optional AI assistance comes later and will never be required.
+- **Next:** authorization testing across roles and accounts, then injection and
+  misconfiguration checks, each with runtime verification. Optional AI assistance comes
+  later and will never be required.
 
 Known limits today: BOLA testing needs you to name one record per owner; there is no
 tenancy or function-level authorization testing yet; OAuth authorization flows, OIDC, MFA

@@ -1,0 +1,42 @@
+# Assesses laravel-api-starter WITHOUT its OpenAPI document: the surface comes
+# from the Laravel adapter reading the routing table (and from crawling), and
+# the oracle from the access policy below. The reference workflow substitutes
+# @SOURCE_ROOT@ with the starter's checkout and runs:
+#
+#   sulayi attack -c <this file> --no-probe --env <starter>/.env
+#
+# The public routes are the starter's own unauthenticated routes
+# (routes/api.php); everything else under /api requires a signed-in user.
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://127.0.0.1:8000
+discovery:
+  probeWellKnownPaths: false
+adapters:
+  sourceRoot: "@SOURCE_ROOT@"
+  use:
+    - name: laravel
+      path: ./dist/sulayi-adapter-laravel
+access:
+  protected: ["/api/**"]
+  public:
+    - /api/health/**
+    - /api/app-versions/latest
+    - /api/auth/sign-in
+    - /api/users/sign-up
+    - /api/email/**
+    - /api/forgot-password
+    - /api/reset-password
+identities:
+  - id: sysad
+    role: system-admin
+    authentication:
+      type: login
+      login:
+        path: /api/auth/sign-in
+        body:
+          identifier: { env: SYSAD_EMAIL }
+          password: { env: SYSAD_PASSWORD }
+        session:
+          bearer: /token
+    liveness: { method: GET, path: /api/users/auth }
