@@ -1,507 +1,337 @@
-# Sulayi
+![Sulayi — automated penetration testing](assets/branding/sulayi-cover.png)
 
-**An assessment-coverage and verification layer.**
+<p align="center">
+  <a href="https://github.com/jaylordibe/sulayi/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jaylordibe/sulayi/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="go.mod"><img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/jaylordibe/sulayi"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+</p>
 
-Sulayi runs the security engines you already trust, refuses to overstate what
-they found, and produces a defensible account of what was tested, what was blocked, what
-was never attempted, and why.
-
-Most scanners answer *"what did you find?"*. This one is built to answer the question that
-actually decides whether a report means anything:
-
-> **"What did you not test?"**
-
-On a real application it reports things like *10 of 84 operations executed* — with a
-machine-readable cause for each of the other 74. A scan that exercised a tenth of the
-surface and found nothing is not a clean result, and saying so is the product.
-
-> **Sulayi does not prove that an application is secure.** A run with no
-> findings means only that the checks it executed, against the operations it could see,
-> produced none. Every report states what was not tested and why.
-
-It also brings its own checks — declared authentication with an authenticated control
-behind it (M1) and cross-owner resource access (M2) — and derives expectations from the
-application's own framework metadata where a specification is silent (M3). Those are
-contributors to the ledger rather than the headline: see
-[ADR-0017](docs/adr/0017-reposition-to-coverage-and-verification.md) for why, and the
-[product validation gate](docs/evaluation/product-validation-gate.md) for the evidence
-behind it.
-
-**Status: v0.x.** All three engine integrations have been exercised against real binaries —
-Nuclei v3.11.1, ZAP 2.17.0 and opengrep v1.29.0. **Semgrep itself has never been executed**;
-the source-analysis integration accepts either binary and only opengrep has been run, so
-treat Semgrep support as untested code
-([details](docs/engines/README.md#validation-status)). Both reference applications are
-assessed while running in CI. Schemas may change before 1.0. See
-[What Sulayi does not do yet](#what-sulayi-does-not-do-yet) before
-relying on it. It has not been evaluated for precision or recall against a corpus of real
-applications, so no detection-quality claim is made.
-
----
-
-## Naming
-
-| | |
-|---|---|
-| Product name | Sulayi |
-| Repository | `sulayi` |
-| CLI executable | `sulayi` |
-| Assessment command | `sulayi attack` |
-| Configuration file | `sulayi.yaml` |
-| Runtime state directory | `.sulayi/` |
-| Machine-readable tool id | `sulayi` |
-
----
-
-## Why this exists
-
-Two real applications were studied while designing this project. Both run OWASP ZAP in
-CI. Both scans pass. Both authenticate as a **single administrator** holding every
-permission, and both run with `-I` so the job can never fail. One has a rules file that is
-entirely comments.
-
-Neither scan can detect a broken ownership or tenant boundary — not because ZAP is
-deficient, but because a single-identity scan cannot express a cross-identity
-expectation. **Nothing in either report says so.** The pipeline looks green.
-
-Sulayi is built around the two things that make that possible:
-
-1. **The oracle** — deciding whether a response is a vulnerability requires knowing what
-   *should* have happened. Sulayi derives that expectation from the
-   application's own artefacts, and grades how much the derivation can be trusted.
-2. **The ledger** — every unit of intended work carries a disposition: executed, blocked
-   with a machine-readable cause, or untested with a reason. Coverage accounting is
-   [absent from every open-source tool we surveyed](docs/research/ecosystem.md).
-
-What Sulayi deliberately does **not** claim: novelty for multi-identity
-authorization testing. [`praetorian-inc/hadrian`](https://github.com/praetorian-inc/hadrian)
-ships that, in Go, under Apache-2.0. Our reasoning is in
-[ADR-0003](docs/adr/0003-differentiator-oracle-and-coverage.md).
-
----
-
-## Install
-
-Requires Go 1.27 or newer.
-
-```bash
-# The latest published release.
-go install github.com/jaylordibe/sulayi/cmd/sulayi@latest
-
-# A specific release, which is what to pin in CI.
-go install github.com/jaylordibe/sulayi/cmd/sulayi@v0.1.0
-
-# The development branch, which may be ahead of any release.
-go install github.com/jaylordibe/sulayi/cmd/sulayi@main
-```
-
-Or build from source:
-
-```bash
-git clone https://github.com/jaylordibe/sulayi
-cd sulayi
-make build      # produces ./dist/sulayi
-```
-
-Check what you installed:
-
-```bash
-sulayi version
-```
-
-Sulayi is a single static binary. No runtime, no database, no account, no cloud
-service.
-
-**Platforms.** Built and tested by CI on Linux, macOS and Windows (`go test` and
-`go test -race` on all three). The reference-application and real-engine validation runs
-on Linux only, so behaviour with external engines is best evidenced there.
-
----
-
-## Use
+**Sulayi is a local-first penetration testing tool for applications you own.** Point it at
+your running app, give it test accounts, and it attacks the app the way an outsider would
+— then reports only what it could verify, and states plainly what it did not test.
 
 ```bash
 sulayi attack http://localhost:3000
 ```
 
-The URL you pass **is the authorization you are granting**: Sulayi contacts that
-origin and nothing else unless you widen the scope in `sulayi.yaml`.
+It runs on your machine as a single binary, needs no account or cloud service, and enforces
+its own safety rules in code: scope, impact, request budgets and an audit log of every
+request it sends.
+
+> [!IMPORTANT]
+> **Sulayi is early-stage (v0.x, unreleased).** Today it tests authentication and
+> object-level authorization on APIs that publish an OpenAPI document. Injection testing,
+> crawling and login flows are planned, not built. See [Status](#status).
+
+---
+
+## Contents
+
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Capabilities](#capabilities)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Safety](#safety)
+- [Results and verification](#results-and-verification)
+- [Status](#status)
+- [Documentation](#documentation)
+
+---
+
+## Quick start
+
+**Requirements:** Go 1.27.1 or newer, and an application that serves an OpenAPI 3.x document
+(or a copy of one on disk).
 
 ```bash
-sulayi init      # write a commented sulayi.yaml
-sulayi doctor    # what is installed, and what each missing piece would unlock
+go install github.com/jaylordibe/sulayi/cmd/sulayi@latest
+```
+
+Start your application, then:
+
+```bash
+sulayi attack http://localhost:3000
+```
+
+Sulayi looks for the specification at common paths such as `/openapi.json`,
+`/api/docs-json` and `/v3/api-docs`. If yours lives elsewhere, say so:
+
+```bash
 sulayi attack http://localhost:3000 --spec ./openapi.json
-sulayi attack https://staging.example.com --spec-url https://staging.example.com/openapi.json
+sulayi attack http://localhost:3000 --spec-url http://localhost:3000/docs/api.json
 ```
 
-### External engines
+A real run against a small app whose admin endpoint forgot its authentication check:
 
-```yaml
-engines:
-  nuclei:
-    enabled: true
-    executable: /usr/local/bin/nuclei
-    templates: ./nuclei-templates    # required; nothing is downloaded
+```text
+Sulayi assessment 20261118T170811Z-dbd055c8
+  target:   http://127.0.0.1:62734
+  profile:  standard
+  surface:  5 operations from openapi-url
+  oracle:   usable (declared)
+
+  executed: 2
+  blocked:  1
+  untested: 2
+  findings: 0 confirmed, 1 suspected
+  requests: 16 of 1000
+
+sulayi: policy threshold exceeded:
+  - suspected high finding: Operation declared as requiring authentication is served
+    without credentials (GET /api/admin/users)
 ```
 
-> **Nuclei and ZAP are currently blocked in every profile.** They open their own network
-> connections, which Sulayi's scope enforcement cannot constrain, and a security tool that
-> bypasses the boundary it works within is not acceptable. Enabling them records a blocked
-> ledger row and a **COVERAGE REDUCED** notice; neither is started. This lasts until a
-> verified outbound-destination control exists. The source scanner, which reads local
-> files, is unaffected.
+The finding is *suspected*, not confirmed, because no test account was configured to
+compare against. [Add identities](#identities) and the same defect can be confirmed.
 
-Sulayi does not reimplement Nuclei's templates, ZAP's active scanner or
-Semgrep's dataflow analysis. It supervises them: explicit argument vectors and never a
-shell, an environment built from nothing so your bearer tokens cannot reach a third-party
-process, process groups so a killed engine cannot leave a JVM or a browser running, and
-budgets on time and output.
+> [!NOTE]
+> The URL you pass **is the authorization you grant**. Sulayi contacts that origin and
+> nothing else unless you widen scope in `sulayi.yaml`. Test only applications you own or
+> are explicitly authorized in writing to test.
 
-**An engine result is an observation, not a finding.** Nuclei saying `critical` is Nuclei's
-opinion of its own template; it is not evidence that your application is exploitable. Every
-imported result is `observed`, Sulayi's own severity is `unassessed`, and nothing an engine
-reports can fail your build on its own. Two engines agreeing is not verification either.
+---
 
-**A failed engine makes the report less confident, not quieter.** Missing, crashed, hung,
-flooding or timed-out — each becomes a blocked ledger row saying which classes are
-therefore still unassessed. An engine that did not complete assesses nothing, and a passive
-ZAP scan does not claim the injection classes its active scanner would have tested.
+## How it works
 
-`sulayi doctor` reports which engines are installed, what each would unlock, and changes
-nothing on your machine. It reports Nuclei and ZAP as blocked without executing them.
-
-### Framework adapters
-
-```yaml
-adapters:
-  sourceRoot: ../my-application
-  use:
-    - name: laravel
-      path: ./dist/sulayi-adapter-laravel
+```text
+ target URL ──► discover ──► plan ──► attack ──► verify ──► report
+                   │           │         │          │          │
+            OpenAPI document   │   every request    │    JSON, SARIF,
+            + framework        │   through one      │    coverage ledger,
+            adapters           │   safety-enforcing │    request log
+                               │   HTTP client      │
+                 profile gate, scope,      authenticated control
+                 request budget            requests, owner re-reads
 ```
 
-The shipped adapters read your source and **execute nothing** — no `artisan`, no module
-imports, no `composer install`, no `npm install`, no project scripts. That matters more
-than it sounds: `artisan` boots every service provider, importing a NestJS module runs it,
-and installing dependencies runs their lifecycle hooks. Doing any of that against a
-repository is a decision, so it sits behind `adapters.trust: execute-target-code` and no
-adapter shipped here needs it.
+1. **Discover.** The attack surface comes from the application's OpenAPI document, plus
+   optional framework adapters (Laravel, NestJS) that read your source without executing
+   it.
+2. **Plan.** Every operation is matched to the checks that apply to it. Anything that is
+   not tested gets a ledger row saying why — no oracle, missing resource, safety policy,
+   out of budget.
+3. **Attack.** Requests go out through a single HTTP client that enforces scope, the
+   safety profile, the request budget and credential binding on every request.
+4. **Verify.** A response is not a finding. Sulayi repeats, compares and re-reads until a
+   result is either proven or stays *suspected* with the reason it could not be proven.
+5. **Report.** You get the findings, the evidence behind them, a ledger of what was and
+   was not tested, and a log of every request sent.
 
-Write your own in any language: [the contract](docs/adapters/contract.md) is JSON on
-stdout with a JSON Schema and a conformance suite.
+---
 
-### Identities and owned resources
+## Capabilities
 
-Give it a credential and it can compare what an anonymous caller received against what a
-legitimate one receives. That comparison is the only way a finding reaches `confirmed`.
+| Capability | Status |
+|---|---|
+| Missing authentication: endpoints declared protected but served anonymously | Implemented |
+| Broken object-level authorization (BOLA/IDOR): reads and writes across two accounts | Implemented |
+| Verification against an authenticated control request, with credential liveness checks | Implemented |
+| Coverage ledger: tested, blocked and untested, with a machine-readable cause each | Implemented |
+| Safety profiles, request budgets, interrupt handling and fixture restoration | Implemented |
+| JSON and SARIF reports, redacted evidence, request audit log | Implemented |
+| Framework adapters for Laravel and NestJS (static source reading) | Implemented |
+| Undocumented surface hints from `Link`, `robots.txt` and the app's own JavaScript | Implemented (recorded, not tested) |
+| Source analysis with your own opengrep/Semgrep rules | Experimental — Semgrep itself never executed |
+| Nuclei and ZAP integrations | Built, **currently blocked** (see [Safety](#safety)) |
+| Login flows, cookie sessions, multiple roles, `--env` credential files | Planned |
+| Testing applications without an OpenAPI document (crawling) | Planned |
+| Injection and misconfiguration checks | Planned |
+| `sulayi report`, `sulayi verify <finding-id>` | Planned |
 
-```yaml
-identities:
-  - id: admin
-    label: Administrator
-    authentication:
-      type: bearer                      # or apiKey, with a header
-      credential:
-        env: SULAYI_ADMIN_TOKEN         # or: file: /run/secrets/admin-token
-    liveness:                           # optional, strongly recommended
-      method: GET
-      path: /api/me
-      expectStatus: [200]
-```
+---
+
+## Usage
 
 ```bash
-SULAYI_ADMIN_TOKEN='...' sulayi attack http://localhost:3000
+sulayi attack <url>   # assess an application
+sulayi init           # write a commented sulayi.yaml
+sulayi doctor         # what is installed, configured and blocked; changes nothing
+sulayi version        # version, Go toolchain and platform
 ```
 
-**A credential is never written into `sulayi.yaml`.** The file has no field that accepts
-one — only a reference to an environment variable or a file — so it stays safe to commit
-and safe to review. There is no `--token` flag either: process listings are readable by
-other users and shell history outlives the run.
+`sulayi attack` flags:
 
-The `liveness` probe is an operation *you* nominate, because guessing `/me` or `/whoami`
-would produce a 404 on most applications and a 404 is indistinguishable from an expired
-credential. It is what lets a run notice that a token died halfway through instead of
-reporting the resulting sweep of denials as a clean result.
+| Flag | |
+|---|---|
+| `--profile` | `safe`, `standard` (default) or `aggressive` |
+| `--spec <file>` | OpenAPI document on disk |
+| `--spec-url <url>` | OpenAPI document served by the target |
+| `--no-probe` | do not look for a specification at well-known paths |
+| `-c, --config <file>` | configuration file (default `./sulayi.yaml` if present) |
+| `-o, --output <dir>` | run output directory (default `.sulayi`) |
+| `--yes` | confirm `aggressive` where there is no terminal; changes nothing else |
 
-With **two** identities and a resource you know one of them owns, it will test whether the
-other can reach it — broken object-level authorization, the largest class of real API
-findings. Both parts belong in the same file:
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | ran; no policy threshold exceeded |
+| `1` | findings exceeded the configured policy |
+| `2` | invalid command line or configuration; nothing ran |
+| `3` | executed no checks — establishes nothing |
+| `4` | could not complete: target unreachable, interrupted, out of time or out of requests |
+| `5` | internal error |
+
+By default a run fails on any confirmed finding and on a suspected finding of high severity
+or above. Suspected findings count on purpose: without test accounts nothing can be
+confirmed, and a gate that passed a real authentication bypass would be worse than none.
+
+---
+
+## Configuration
+
+Run `sulayi init` for a fully commented `sulayi.yaml`, or start from
+[`sulayi.example.yaml`](sulayi.example.yaml). Everything is optional except the target.
+
+### Identities
+
+Test accounts let Sulayi compare what an anonymous caller gets with what a legitimate user
+gets — the only way a finding reaches *confirmed*.
 
 ```yaml
 identities:
   - id: alice
     authentication:
-      type: bearer
+      type: bearer                     # or apiKey, with a header
       credential:
-        env: SULAYI_ALICE_TOKEN
-  - id: bob                           # the non-owner; a second identity is required
+        env: SULAYI_ALICE_TOKEN        # or: file: /run/secrets/alice-token
+    liveness:                          # strongly recommended
+      method: GET
+      path: /api/me
+      expectStatus: [200]
+  - id: bob
     authentication:
       type: bearer
       credential:
         env: SULAYI_BOB_TOKEN
+```
 
+```bash
+SULAYI_ALICE_TOKEN='…' SULAYI_BOB_TOKEN='…' sulayi attack http://localhost:3000
+```
+
+**A credential never goes in `sulayi.yaml`** — the file only accepts a reference to an
+environment variable or a file, so it is safe to commit. There is no `--token` flag,
+because process listings and shell history outlive the run. The `liveness` probe lets a
+run notice a token expiring mid-assessment instead of reporting the resulting denials as a
+clean result. Use dedicated, minimally privileged test accounts.
+
+### Owned resources
+
+With two identities and a record one of them owns, Sulayi tests whether the other can
+read or change it:
+
+```yaml
 resources:
   - id: order-alice
     type: order
-    owner: alice                      # must be one of the identities[].id above
-    crossOwnerAccess: denied          # required; "allowed" for shared resources
+    owner: alice
+    crossOwnerAccess: denied           # required; "allowed" for shared records
     values:
-      orderId: "abc123"               # fills GET /api/orders/{orderId}
+      orderId: "abc123"                # fills /api/orders/{orderId}
+    disposable: true                   # this exact record may be changed under `standard`
+    mutation:                          # enables the write test
+      values:
+        status: "sulayi-marker"
 ```
 
-A fixture applies only to operations that actually name the object — one with a path
-parameter this fixture can fill. It is never applied to a collection or a health endpoint,
-because two identities receiving the same response from `/health` says nothing about
-ownership.
-
-A fixture also makes a parameterised operation testable at all. Without one,
-`/api/orders/{orderId}` can only be probed by inventing an identifier, and the resulting
-404 says nothing — so it is reported as untestable rather than clean.
-
-`crossOwnerAccess` has no default on purpose. Assuming every owned resource is private
-would report every deliberately shared record — a public profile, a team document — as a
-broken access control.
-
-### What a run looks like
-
-```
-Sulayi assessment 20260905T154341Z-7a55b019
-  target:   http://127.0.0.1:8731
-  profile:  standard
-  surface:  6 operations from openapi-url
-  oracle:   usable (declared)
-
-  executed: 2
-  blocked:  1
-  untested: 3
-  findings: 0 confirmed, 1 suspected
-```
-
-The ledger is the deliverable:
-
-| disposition | operation | cause | why |
-|---|---|---|---|
-| executed | `GET /api/admin/users` | — | suspected finding raised |
-| executed | `GET /api/profile` | — | refused anonymous access, as declared |
-| untested | `GET /api/health` | `no_oracle` | declared public; success is expected |
-| untested | `GET /api/orders/{id}` | `missing_resource` | requires a path parameter; probing with an invented id would test nothing |
-| untested | `POST /api/auth/login` | `safety_policy` | authentication route; sweeping it can lock real accounts |
-| blocked | `POST /api/orders` | `safety_policy` | `POST` to a fixture not declared disposable needs the `aggressive` profile |
-
-That fourth row is the one that matters. If `GET /api/orders/{id}` returns 404 because the
-database is empty, the endpoint was **not** meaningfully security-tested — and most tools
-would count it as covered.
-
-### Where the output goes
-
-Each run writes one directory under `.sulayi/`, created `0700` with files `0600`:
-
-```
-.sulayi/runs/20260907T025905Z-23923611/
-  report.json      the full assessment, including the coverage ledger
-  report.sarif     SARIF 2.1.0, for code-scanning tools
-  meta.json        what produced this run
-  evidence/        the exchanges behind each finding, content-addressed
-  fingerprint.key  per-run key for correlating redacted values; never leaves the directory
-```
-
-Runs are append-only and independent: nothing is read back from a previous run, so a stale
-directory cannot influence a new assessment. **It is safe to delete `.sulayi/` at any
-time**, and it is gitignored by default — do not commit it, because evidence can contain
-whatever your target returned.
-
----
-
-## How it decides things
-
-**Severity and confidence are independent.** Severity asks how bad it would be if real;
-confidence asks how sure we are. `HIGH` severity with `LOW` confidence is valid and
-expected. Confidence comes from evidence quality and verification state only — never from
-how many tools agreed.
-
-**A finding is `suspected` until verification succeeds.** A single unauthenticated `200`
-is not proof, so the check runs a ladder of discriminators — catch-all fingerprinting,
-content type, error envelopes carried in `2xx` bodies, cache-hit detection, repetition —
-and records which ones passed. Without a configured identity there is no authenticated
-control request, so nothing can reach `confirmed`, and the report *names that gap* rather
-than rounding up.
-
-**A finding is `confirmed` only by a live authenticated control that matches materially.**
-Anonymous 200 plus authenticated 200 is not enough — that rule confirms every
-single-page-app shell and every 200-carrying error envelope. Confirmation requires both
-responses to classify as allowed, the same status, the same content type, the same JSON
-document *shape* (key paths and value types, values ignored so a request id cannot break a
-real match), and no cache hit on the control. Anything else stays `suspected` and names
-the gap. See
-[ADR-0012](docs/adr/0012-authenticated-control-and-material-equivalence.md).
-
-**A broken credential can never produce a clean result.** Inference runs one way: a control
-that succeeds and matches raises a finding; a control that is missing, rejected, expired or
-different only ever leaves it suspected. A finding is raised by an anonymous success and
-never by an authenticated failure, so forgetting to set an environment variable cannot turn
-a vulnerable application green — it produces a blocked identity row and a named gap.
-
-**An adapter fact is an expectation, never evidence.** Your framework knows things OpenAPI
-cannot express — which routes are behind authentication middleware, which have an
-authorization control. An adapter reads that and hands it to the oracle, which can make an
-operation testable that had nothing to test it against. It does **not** establish that the
-control works: that is what the requests are for. So an adapter-derived expectation
-produces a *suspected* finding a human reads, never a confirmed one.
-
-**Two sources that disagree are a finding about your application.** If OpenAPI says an
-operation is public and the framework says it is protected, Sulayi does not pick
-one. It withdraws the expectation from both and reports the disagreement — choosing a
-winner with no evidence would be a guess, and which one won would depend on the order the
-sources happened to be read in.
-
-**An external scanner's confidence is not Sulayi's.** ZAP emits four risks and five
-confidences, Nuclei five severities and no confidence, Semgrep three levels. None of those
-scales maps onto another, so none is converted: each engine's own values are preserved
-verbatim beside Sulayi's `unassessed`. See
-[ADR-0015](docs/adr/0015-external-engine-boundary.md).
-
-**A cross-owner result needs three requests, not two.** The owner reads the resource, the
-non-owner probes it, and the owner reads it again. The re-check is not padding: without
-it, a record deleted between the first two requests makes the non-owner's 404 look like an
-enforced boundary, and the run would report an untested control as working. Both
-identities must also be live, or a dead token returning 404 to everything would make any
-application look secure.
-
-**A cross-owner finding is confirmed only when the non-owner got *that* resource.** Two
-orders have the same JSON shape, so an application that quietly returns the caller's own
-record would match on shape alone. Confirmation additionally requires the fixture's own
-identifying value at the same field in both responses, or two identical documents.
-
-**A write is confirmed only by the owner's own view changing.** An HTTP 200 for a write
-that was silently discarded is common — it is what a status-only check reports as an
-unauthorized mutation, and it is wrong every time. See
-[ADR-0013](docs/adr/0013-cross-owner-verification-semantics.md).
-
-**`404` counts as a denial.** Returning not-found for a resource the caller may not see is
-a legitimate anti-enumeration pattern; treating it as a distinct outcome would report good
-security design as a bug.
-
-**Status codes are not trusted alone.** One studied application returns `400` for
-authentication failure, `400` for validation failure, `400` for a missing record, and `200`
-for a record owned by a different user. If your application publishes a stable error code,
-point `outcome.errorCodePointer` at it and Sulayi will use it in preference to
-the status.
+A fixture applies only to operations that name the object, never to collections or health
+endpoints. A write is confirmed only by the owner's own view changing, never by a `200`,
+and the changed fields are restored afterwards.
 
 ---
 
 ## Safety
 
-Profiles are strictly ordered and never escalate implicitly:
+Every request passes through one HTTP client that makes the safety decision from the
+request itself — never from a check's description of what it is about to send.
 
-| profile | permits |
+| Profile | Permits |
 |---|---|
 | `safe` | reconnaissance and read-only checks; nothing state-changing |
-| `standard` (**default**) | also state-changing requests, but only the exact requests bound from fixtures you declared `disposable`, changing only their configured fields, never `DELETE` |
-| `aggressive` | state-changing and destructive tests against any in-scope target; requires `target.disposable: true`, typing the target's origin to confirm (or `--yes` with no terminal), and exact-origin scope entries |
+| `standard` (default) | also state-changing requests, but only the exact requests bound from fixtures declared `disposable`, changing only their configured fields, never `DELETE` |
+| `aggressive` | state-changing and destructive tests against any in-scope target |
 
-This is decided in the HTTP client every request passes through, from the request
-itself — never from a check's description of what it is sending. A read-only method is
-assumed not to change state unless you list it in `assessment.stateChangingOperations`
-(`GET /logout`). See [ADR-0019](docs/adr/0019-safety-enforced-at-the-http-client.md).
+**`aggressive` needs three things:** `target.disposable: true` in `sulayi.yaml`, typing the
+target's exact origin at the prompt (`--yes` replaces only the prompt where there is no
+terminal), and scope entries that each name one exact origin.
 
-**Limits.** `assessment.maxRequests` (default 1,000) and `assessment.maxDurationMinutes`
-(default 30). A run that hits either, or that you interrupt, still writes its report, says
-why it stopped, and exits 4. Restoring a fixture you changed runs on a small allowance
-above the request limit and outside the time limit, so stopping is never what leaves data
-modified; a restoration that fails or cannot be verified is reported as **CLEANUP
-INCOMPLETE**, naming the fixture. Restoration is attempted, never guaranteed.
-
-**Accountability.** Every request — sent, refused or failed — is a line in
-`requests.jsonl` in the run directory, redacted, with the identity that sent it. A
-credential is only ever sent to its identity's own target origin.
-
-Scope is an **allowlist**, enforced both on the URL before any DNS is emitted and on every
-resolved IP at dial time. Redirects are never followed automatically. Cloud metadata
-addresses are denied even when private addressing is enabled. See
-[ADR-0008](docs/adr/0008-scope-is-the-authorization-boundary.md).
-
-Secrets are redacted **at capture time**, so they never reach disk. Run directories are
-created `0700` with files `0600`. Redaction is a mitigation, not a guarantee — do not
-commit `.sulayi/`.
-
----
-
-## What Sulayi does not do yet
-
-Being specific about this is part of the product.
-
-- **BOLA testing needs you to name the resource.** Fixtures are configured, not
-  discovered: you must know one identifier belonging to one identity. Creating resources
-  through the application's own API is deferred to environment provisioning, so M2 is
-  marked partial in [the roadmap](docs/roadmap.md).
-- **No tenancy, function-level authorization, or privilege escalation.** One owner, one
-  non-owner, one resource is the whole primitive.
-- **No cross-owner `DELETE`.** It destroys the fixture and proves nothing a `PATCH` does
-  not.
-- **External engines are orchestrated, not verified.** Nuclei, ZAP and Semgrep/opengrep can
-  run behind one hardened boundary, but nothing they report is confirmed by Sulayi:
-  an alert enters as `observed` with severity `unassessed` and stays there. No
-  engine has yet been executed against a real installed binary in this repository's own
-  testing, so the milestone is marked partial — see
-  [the roadmap](docs/roadmap.md). Hadrian is not integrated.
-- **You install and configure the engines.** Sulayi never downloads or installs
-  one, ships no templates or rules, and will not let an engine fetch its own corpus: a
-  corpus that changed overnight makes two runs incomparable.
-- **Framework adapters read source; they do not ask the framework.** The Laravel and
-  NestJS adapters never execute your application, which means they cannot resolve anything
-  dynamic — a gate table built in a provider loop, a guard whose semantics they do not
-  recognise. They say so, per fact and per run. Framework-native introspection is designed
-  and gated but not shipped
-  ([ADR-0014](docs/adr/0014-adapter-contract-and-extraction-trust.md)).
-- **Discovery finds some undocumented surface, never all of it.** `Link` headers,
-  `robots.txt`, the JavaScript the target's own root document references and five
-  standardized metadata documents reveal what an application happens to publish about
-  itself. A route referenced from none of those is still invisible, and no report offers a
-  completeness figure, because there is no denominator for one. What a discovered path
-  gets is an untested ledger row and a reason — never a method, and never a security
-  expectation inferred from its name.
-- **Only bearer and header API-key authentication.** No OAuth2 flows, no OIDC, no browser
-  login, no cookie-session establishment, no refresh rotation. Query-string API keys are
-  refused deliberately: a credential in a URL reaches error text, reproduction strings and
-  every intermediary's access log.
-- **No AI**, no dashboard, no database, no crawler, no injection payloads. Discovery reads
-  one page and the scripts it names: no anchors, no forms, no sitemap, no recursion, and
-  no wordlist. Nothing it discovers is ever fetched.
-- **No measured precision or recall.** The evaluation harness proves the check
-  distinguishes paired vulnerable and secure fixtures; it does not establish a
-  false-positive rate on real applications.
-- **Sulayi is fingerprintable, so a hostile target can cloak.** Its user agent,
-  cache buster and baseline paths are identifiable by design, because a scanner that
-  disguises itself is harder to authorize and harder to stop. That is the right trade for
-  assessing your own application, and a real limitation otherwise.
-
----
-
-## Exit codes
-
-A pipeline must be able to tell "ran cleanly" from "could not run".
-
-| code | meaning |
+| Control | |
 |---|---|
-| 0 | ran; no policy threshold exceeded |
-| 1 | findings exceeded the configured policy |
-| 2 | invalid command line or configuration; nothing ran |
-| 3 | **executed no checks — establishes nothing** |
-| 4 | could not complete |
-| 5 | internal error |
+| Scope | An allowlist checked on the URL before any DNS lookup and on every resolved address at dial time. Redirects are never followed. Cloud metadata addresses are always denied. |
+| Credentials | Sent only to the identity's own target origin, never to another in-scope host. |
+| Limits | `assessment.maxRequests` (default 1,000) and `assessment.maxDurationMinutes` (default 30). |
+| Interrupts | Ctrl-C stops the run and kills child processes; once the assessment has started, it still writes its report. A second Ctrl-C exits at once. |
+| Restoration | After a write, restoring the fixture runs on its own bounded budget, outside the time limit. A restoration that fails or cannot be verified is reported as **CLEANUP INCOMPLETE**. It is attempted, never guaranteed. |
+| Audit | Every request — sent, refused or failed — is a redacted line in `requests.jsonl`. |
+| Redaction | Secrets are redacted at capture, before anything reaches disk. A mitigation, not a guarantee. |
 
-The default policy fails the run on any confirmed finding, and on a **suspected** finding
-of high severity or above:
+A read-only method is assumed not to change state unless you list it in
+`assessment.stateChangingOperations` (for example `GET /logout`).
 
-```yaml
-policy:
-  failOnConfirmed: low
-  failOnSuspected: high
+> [!WARNING]
+> **Nuclei and ZAP are blocked in every profile.** They open their own network
+> connections, which Sulayi's scope enforcement cannot constrain. Enabling them records a
+> blocked ledger row and a **COVERAGE REDUCED** notice; neither is started. The
+> integrations are kept for when a verified outbound control exists. See
+> [ADR-0019](docs/adr/0019-safety-enforced-at-the-http-client.md).
+
+---
+
+## Results and verification
+
+Each run writes one directory under `.sulayi/runs/`, created `0700` with files `0600`.
+The `runs/` directory carries its own `.gitignore`, so evidence is never committed by
+accident:
+
+```text
+.sulayi/runs/<run-id>/
+  report.json       findings, evidence references and the coverage ledger
+  report.sarif      SARIF 2.1.0 for code-scanning tools
+  requests.jsonl    one redacted line per request
+  evidence/         the exchanges behind each finding, content-addressed
+  meta.json         what produced the run
+  fingerprint.key   per-run key for correlating redacted values
 ```
 
-Suspected findings count deliberately. Sulayi cannot reach `confirmed` without
-configured credentials, so gating only on confirmed findings would exit `0` on a real
-authentication bypass — a silent pass is the worst possible default for a security gate.
+**How a finding earns its state:**
+
+- **Suspected** until verification succeeds. A single anonymous `200` is not proof:
+  Sulayi fingerprints catch-all routes, error envelopes inside `2xx` bodies and cache hits,
+  and repeats the request.
+- **Confirmed** only when a live authenticated control matches materially — same outcome,
+  status, content type and JSON shape, and no cache hit.
+- **Cross-owner reads** need three requests: the owner reads, the other account probes, the
+  owner reads again, so a record that vanished mid-test cannot pass as a denial. A read is
+  confirmed only when the other account got *that* record.
+- **A broken credential never produces a clean result.** An expired or rejected token
+  becomes a blocked row and a named gap, never a pass.
+- **External engine results are observations**, recorded verbatim and never promoted.
+
+The ledger is the other half of the report. A run that tested a tenth of the surface and
+found nothing is not a clean result, and Sulayi says so — with a cause for every operation
+it did not test.
+
+---
+
+## Status
+
+Sulayi is pre-1.0 and has no published release. Output schemas may change.
+
+- **Evidence so far:** paired vulnerable and secure fixtures in the evaluation harness, two
+  reference applications assessed in a weekly CI workflow, and manually triggered
+  real-binary integration tests for the engines. Precision and recall on real applications have **not** been
+  measured, so no detection-quality claim is made.
+- **Platforms:** CI builds and tests on Linux, macOS and Windows.
+- **Next:** authentication flows and multiple roles, then testing applications without an
+  OpenAPI document, then injection and misconfiguration checks, each with runtime
+  verification. Optional AI assistance comes later and will never be required.
+
+Known limits today: BOLA testing needs you to name one record per owner; there is no
+tenancy or function-level authorization testing yet; authentication is bearer or header
+API key only; and an application whose `GET` endpoints change state is protected only as
+far as you list them.
 
 ---
 
@@ -509,36 +339,27 @@ authentication bypass — a silent pass is the worst possible default for a secu
 
 | | |
 |---|---|
-| [Architecture](docs/architecture.md) | pipeline, packages, boundaries |
-| [Product thesis](docs/research/product-thesis.md) | why this exists, and what it refuses to build |
-| [Ecosystem research](docs/research/ecosystem.md) | ZAP, Nuclei, Semgrep, Playwright, Hadrian — licences and findings |
-| [Reference applications](docs/research/reference-applications.md) | the evidence behind the design |
-| [Threat model](docs/security/threat-model.md) | this framework's own attack surface |
-| [Cross-owner integration](docs/evaluation/cross-owner-integration.md) | running M2 against the two reference APIs |
-| [Writing an adapter](docs/adapters/contract.md) | the contract, in any language |
-| [External engines](docs/engines/README.md) | installing, configuring and what each one covers |
-| [Adapters on real applications](docs/evaluation/adapters-on-reference-applications.md) | what they extract, and what they cannot |
-| [Engines on real applications](docs/evaluation/engines-on-reference-applications.md) | what M4 ran, what it could not, and why M4 is partial |
-| [Product validation gate](docs/evaluation/product-validation-gate.md) | does this justify its complexity? evidence, and a REPOSITION recommendation |
-| [Discovery on real applications](docs/evaluation/discovery-on-reference-applications.md) | what M5 finds on the reference apps, and why that is mostly nothing |
-| [ADR-0017: the reposition](docs/adr/0017-reposition-to-coverage-and-verification.md) | why the ledger is the product and authorization is a contributor |
-| [ADR-0018: the rename to Sulayi](docs/adr/0018-product-identity-sulayi.md) | what was renamed, and why the old names are refused rather than aliased |
-| [ADR-0019: safety at the HTTP client](docs/adr/0019-safety-enforced-at-the-http-client.md) | the three profiles, what `standard` may change, and why Nuclei and ZAP are blocked |
-| [Releasing](docs/releases/README.md) | how a release is cut, and why no binaries are published |
-| [ADRs](docs/adr/) | consequential decisions and their alternatives |
-| [Roadmap](docs/roadmap.md) | what is next, and what is explicitly out |
+| [Architecture](docs/architecture.md) | pipeline, packages and boundaries |
+| [Threat model](docs/security/threat-model.md) | Sulayi's own attack surface, each control tied to a test |
+| [Architecture decisions](docs/adr/) | every consequential decision and the alternatives rejected |
+| [External engines](docs/engines/README.md) | Nuclei, ZAP and source analysis: configuration and status |
+| [Writing an adapter](docs/adapters/contract.md) | the adapter contract, in any language |
+| [Roadmap](docs/roadmap.md) | milestones delivered so far |
+| [Changelog](CHANGELOG.md) | what changed |
 
----
+## Contributing
 
-## Authorization
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. `make check` runs
+what CI runs, and `go test ./...` needs no network, database or external engine.
 
-Assess only applications you own or are **explicitly authorized in writing** to test.
-Running this against systems you do not control may be illegal. Sulayi is
-deliberately identifiable in its `User-Agent`; do not remove that.
+## Security
 
-## Licence
+Report vulnerabilities in Sulayi itself privately through
+[GitHub security advisories](https://github.com/jaylordibe/sulayi/security/advisories/new),
+as described in [SECURITY.md](SECURITY.md).
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+## License
 
-Sulayi is not affiliated with OWASP, Checkmarx, ProjectDiscovery,
-Semgrep Inc. or Praetorian. Names are used only to identify those projects.
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Sulayi is not affiliated with
+OWASP, Checkmarx, ProjectDiscovery, Semgrep Inc. or Praetorian; their names are used only
+to identify their projects.
