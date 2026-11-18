@@ -162,20 +162,25 @@
             "type": "string",
             "description": "Human-readable description of the principal."
           },
+          "role": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "description": "What the identity is in the application, e.g. admin or member. Reported only; it grants nothing."
+          },
           "authentication": {
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "type",
-              "credential"
+              "type"
             ],
             "properties": {
               "type": {
                 "enum": [
                   "bearer",
-                  "apiKey"
+                  "apiKey",
+                  "login"
                 ],
-                "description": "bearer sends Authorization: Bearer <credential>. apiKey sends a configured header. OAuth2, OIDC, browser login and cookie-session flows are not supported."
+                "description": "bearer sends Authorization: Bearer <credential>. apiKey sends a configured header. login signs in through the application's own login request and uses the bearer token or the cookies it issues. OAuth2 authorization flows, OIDC and browser login are not supported."
               },
               "header": {
                 "type": "string",
@@ -213,8 +218,174 @@
                     ]
                   }
                 ]
+              },
+              "login": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "body",
+                  "session"
+                ],
+                "description": "The login request. It is the one state-changing request permitted under every profile, and only exactly as configured here.",
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "POST",
+                      "PUT",
+                      "PATCH"
+                    ],
+                    "description": "Defaults to POST. GET is refused: credentials do not belong in a URL."
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^/([^/].*)?$",
+                    "description": "A path on the target, never a URL."
+                  },
+                  "form": {
+                    "type": "boolean",
+                    "description": "Send application/x-www-form-urlencoded instead of JSON."
+                  },
+                  "body": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                        },
+                        "file": {
+                          "type": "string"
+                        },
+                        "fromPreflight": {
+                          "type": "string",
+                          "pattern": "^/",
+                          "description": "JSON pointer into the preflight response."
+                        }
+                      },
+                      "oneOf": [
+                        {
+                          "required": [
+                            "env"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "file"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "fromPreflight"
+                          ]
+                        }
+                      ]
+                    },
+                    "description": "Each field and where its value comes from. A literal value is deliberately not accepted."
+                  },
+                  "preflight": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "path"
+                    ],
+                    "properties": {
+                      "method": {
+                        "enum": [
+                          "GET",
+                          "HEAD"
+                        ]
+                      },
+                      "path": {
+                        "type": "string",
+                        "pattern": "^/([^/].*)?$",
+                        "description": "A path on the target, never a URL."
+                      }
+                    },
+                    "description": "A read-only request sent first, for a CSRF token or cookie."
+                  },
+                  "session": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "bearer": {
+                        "type": "string",
+                        "pattern": "^/",
+                        "description": "JSON pointer to the token in the login response."
+                      },
+                      "cookies": {
+                        "type": "boolean",
+                        "description": "Use the cookies the preflight and login set."
+                      }
+                    },
+                    "oneOf": [
+                      {
+                        "required": [
+                          "bearer"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "cookies"
+                        ]
+                      }
+                    ]
+                  },
+                  "csrf": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "cookie",
+                      "header"
+                    ],
+                    "properties": {
+                      "cookie": {
+                        "type": "string"
+                      },
+                      "header": {
+                        "type": "string",
+                        "pattern": "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$"
+                      }
+                    },
+                    "description": "Send the named cookie's value in this header, for a cookie session."
+                  }
+                }
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "login"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "login"
+                  ],
+                  "not": {
+                    "required": [
+                      "credential"
+                    ]
+                  }
+                },
+                "else": {
+                  "required": [
+                    "credential"
+                  ],
+                  "not": {
+                    "required": [
+                      "login"
+                    ]
+                  }
+                }
+              }
+            ]
           },
           "liveness": {
             "type": "object",

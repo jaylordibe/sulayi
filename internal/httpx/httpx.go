@@ -399,6 +399,50 @@ type Request struct {
 	// identity sets it to its target's origin, so its credential is never sent
 	// to another host, even one that is in scope.
 	BoundOrigin string
+
+	// authentication marks a request made through Authenticate. It is
+	// unexported so that no code outside this package can claim it: the
+	// safety guard's authentication exception is reachable only through that
+	// one method.
+	authentication bool
+}
+
+// AuthResponse is what an authentication request returned, unredacted and in
+// memory only. It exists so that a login flow can read the token or session it
+// was issued — which redaction at capture would otherwise mask — and it is
+// never stored: Authenticate returns no exchange, so nothing it saw can reach
+// evidence. The caller must register what it extracts with the redactor before
+// any later request is captured.
+type AuthResponse struct {
+	Status int
+	Body   []byte
+	// SetCookies are the raw Set-Cookie header values.
+	SetCookies []string
+	// Truncated reports that the body exceeded the client's limit.
+	Truncated bool
+}
+
+// Authenticate sends an identity's configured login or preflight request.
+//
+// It passes every gate Do does — scope, origin binding, the safety guard, the
+// budget, pacing, redirect refusal and the request log — and differs in two
+// ways only: the guard's authentication exception may apply, if the exact
+// request was registered with AllowAuthentication; and the response comes back
+// raw, in memory, instead of as a redacted exchange.
+func (c *Client) Authenticate(ctx context.Context, r Request) (AuthResponse, error) {
+	r.authentication = true
+	var raw AuthResponse
+	if c.opts.Audit != nil && c.auditBroken.Load() {
+		return raw, &ErrNotSent{Err: errors.New("the request log could not be written, so no further " +
+			"request is sent")}
+	}
+	at := c.now()
+	ex, err := c.do(ctx, r, &raw)
+	c.audit(ctx, r, at, ex, err)
+	if err != nil {
+		return AuthResponse{}, c.redactError(err)
+	}
+	return raw, nil
 }
 
 // Do performs a request and returns a redacted exchange.
@@ -418,7 +462,7 @@ func (c *Client) Do(ctx context.Context, r Request) (model.Exchange, error) {
 		}, err
 	}
 	at := c.now()
-	ex, err := c.do(ctx, r)
+	ex, err := c.do(ctx, r, nil)
 	c.audit(ctx, r, at, ex, err)
 	if err != nil {
 		err = c.redactError(err)
@@ -500,7 +544,8 @@ func (c *Client) audit(ctx context.Context, r Request, at time.Time, ex model.Ex
 var errClosed = errors.New("httpx: the client is closed")
 
 // do performs one request without recording it.
-func (c *Client) do(ctx context.Context, r Request) (model.Exchange, error) {
+// When raw is non-nil the unredacted response is written to it as well.
+func (c *Client) do(ctx context.Context, r Request, raw *AuthResponse) (model.Exchange, error) {
 	if c.closed.Load() {
 		err := &ErrNotSent{Err: errClosed}
 		return model.Exchange{
@@ -533,7 +578,7 @@ func (c *Client) do(ctx context.Context, r Request) (model.Exchange, error) {
 
 	// The safety guard runs first: a refused request sends nothing, waits for
 	// nothing and consumes nothing.
-	if err := c.opts.Guard.check(captured.Method, r.URL, r.Body); err != nil {
+	if err := c.opts.Guard.check(captured.Method, r.URL, r.Body, r.authentication); err != nil {
 		var refused *ErrRefused
 		if errors.As(err, &refused) {
 			refused.Target = c.red.URL(refused.Target)
@@ -585,6 +630,13 @@ func (c *Client) do(ctx context.Context, r Request) (model.Exchange, error) {
 	if readErr != nil && !errors.Is(readErr, ErrBodyTooLarge) {
 		ex := model.Exchange{Request: captured, Err: c.red.Error(readErr)}
 		return ex, readErr
+	}
+
+	if raw != nil {
+		raw.Status = resp.StatusCode
+		raw.Body = append([]byte(nil), body...)
+		raw.SetCookies = append([]string(nil), resp.Header.Values("Set-Cookie")...)
+		raw.Truncated = truncated
 	}
 
 	captureResp := &model.CapturedResponse{

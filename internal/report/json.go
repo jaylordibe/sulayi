@@ -121,6 +121,8 @@ type Assurance struct {
 type Identity struct {
 	ID    string `json:"id"`
 	Label string `json:"label,omitempty"`
+	// Role is what the identity is in the application. Reported only.
+	Role string `json:"role,omitempty"`
 	// Scheme is the authentication mechanism, e.g. bearer.
 	Scheme string `json:"scheme,omitempty"`
 	// CredentialSource names where the credential was read from, by location.
@@ -139,6 +141,11 @@ type Identity struct {
 	FirstBadAt        string   `json:"firstBadAt,omitempty"`
 	CanaryProbes      int      `json:"canaryProbes"`
 	Warnings          []string `json:"warnings,omitempty"`
+	// Reauthentications counts sign-ins after the first.
+	Reauthentications int `json:"reauthentications,omitempty"`
+	// UntrustedIntervals are the periods in which this identity's results
+	// were withdrawn because its credential may not have been valid.
+	UntrustedIntervals []Interval `json:"untrustedIntervals,omitempty"`
 }
 
 // Ownership is the cross-owner account.
@@ -463,18 +470,21 @@ func Build(res engine.Result, version string) Document {
 
 	for _, st := range res.Identities {
 		doc.Identities = append(doc.Identities, Identity{
-			ID:                st.ID,
-			Label:             st.Label,
-			Scheme:            string(st.Scheme),
-			CredentialSource:  st.Source,
-			Usable:            st.Usable,
-			Problem:           st.Problem,
-			LivenessMonitored: st.Monitored,
-			Liveness:          string(st.Liveness),
-			LastGoodAt:        timeOrEmpty(st.LastGood),
-			FirstBadAt:        timeOrEmpty(st.FirstBad),
-			CanaryProbes:      st.Probes,
-			Warnings:          st.Warnings,
+			ID:                 st.ID,
+			Label:              st.Label,
+			Scheme:             string(st.Scheme),
+			CredentialSource:   st.Source,
+			Usable:             st.Usable,
+			Problem:            st.Problem,
+			LivenessMonitored:  st.Monitored,
+			Liveness:           string(st.Liveness),
+			LastGoodAt:         timeOrEmpty(st.LastGood),
+			FirstBadAt:         timeOrEmpty(st.FirstBad),
+			CanaryProbes:       st.Probes,
+			Warnings:           st.Warnings,
+			Role:               st.Role,
+			Reauthentications:  st.Reauthentications,
+			UntrustedIntervals: intervals(st.AllWindows()),
 		})
 	}
 
@@ -1118,4 +1128,23 @@ func wrap(s string, width int, indent string) string {
 	}
 	b.WriteString(line + "\n")
 	return b.String()
+}
+
+// Interval is a period in which an identity's results cannot be trusted.
+// Until is empty while the identity is still invalid.
+type Interval struct {
+	After    string `json:"after,omitempty"`
+	FirstBad string `json:"firstBad"`
+	Until    string `json:"until,omitempty"`
+}
+
+func intervals(ws []identity.Window) []Interval {
+	out := make([]Interval, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, Interval{After: timeOrEmpty(w.From), FirstBad: timeOrEmpty(w.FirstBad), Until: timeOrEmpty(w.To)})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

@@ -21,9 +21,9 @@ package outcome
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 
+	"github.com/jaylordibe/sulayi/internal/jsonpointer"
 	"github.com/jaylordibe/sulayi/internal/model"
 )
 
@@ -88,7 +88,7 @@ func classifyByOperatorSignal(resp *model.CapturedResponse, sig Signals) (Classi
 	if sig.ErrorCodePointer == "" || len(resp.Body) == 0 {
 		return Classification{}, false
 	}
-	code, ok := jsonPointerString(resp.Body, sig.ErrorCodePointer)
+	code, ok := jsonpointer.String(resp.Body, sig.ErrorCodePointer)
 	if !ok || code == "" {
 		return Classification{}, false
 	}
@@ -278,43 +278,6 @@ func matchesAny(haystack string, needles []string) bool {
 		}
 	}
 	return false
-}
-
-// jsonPointerString resolves a JSON pointer to a scalar rendered as a string.
-// Only object traversal is supported, which is all an error-code field needs.
-func jsonPointerString(body []byte, pointer string) (string, bool) {
-	if !strings.HasPrefix(pointer, "/") {
-		return "", false
-	}
-	var cur any
-	if err := json.Unmarshal(body, &cur); err != nil {
-		return "", false
-	}
-	for _, rawToken := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
-		token := strings.ReplaceAll(strings.ReplaceAll(rawToken, "~1", "/"), "~0", "~")
-		obj, ok := cur.(map[string]any)
-		if !ok {
-			return "", false
-		}
-		cur, ok = obj[token]
-		if !ok {
-			return "", false
-		}
-	}
-	switch v := cur.(type) {
-	case string:
-		return v, true
-	case float64:
-		// Numeric error codes are common. Trimming trailing zeros here would
-		// turn 100 into "1" and silently break every configured mapping.
-		return strconv.FormatFloat(v, 'f', -1, 64), true
-	case bool:
-		if v {
-			return "true", true
-		}
-		return "false", true
-	}
-	return "", false
 }
 
 // sanitizeShort trims and bounds a target-controlled string for use in a reason.

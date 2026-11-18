@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -882,5 +883,147 @@ func TestDoctorLocatesBlockedEnginesWithoutRunningThem(t *testing.T) {
 	}
 	if !strings.Contains(out, "installed at "+bin+" (not executed)") {
 		t.Errorf("doctor does not say where the blocked engine is installed:\n%s", out)
+	}
+}
+
+// The whole credential path, end to end through the command an operator runs:
+// a --env file supplies the login fields, the identity signs in under the
+// default profile, and the target reflects every secret it was given — the
+// password in a header and a body, the token, the session cookie. None of them,
+// nor the unreferenced secret sitting in the same file, may reach the terminal
+// or any byte under .sulayi.
+func TestLoginThroughEnvFileLeavesNoSecretAnywhere(t *testing.T) {
+	const (
+		password  = "Login-P4ssword-must-never-persist"
+		email     = "alice@example.test"
+		unrelated = "DB-PASSWORD-never-loaded-91c2"
+		token     = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9.c2lnbmF0dXJlLXNlY3JldA"
+		cookie    = "session-cookie-value-7f3d1c9a"
+	)
+	spec := `{"openapi":"3.0.3","info":{"title":"t","version":"1"},"paths":{
+	  "/api/profile":{"get":{"security":[{"bearer":[]}]}}}}`
+	var logins atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Set-Cookie", "app_session="+cookie+"; Path=/; HttpOnly")
+		switch {
+		case r.URL.Path == "/api/auth/login":
+			logins.Add(1)
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["identifier"] != email || body["password"] != password {
+				w.WriteHeader(400)
+				return
+			}
+			w.Header().Set("X-Echo-Password", body["password"])
+			_, _ = w.Write([]byte(`{"accessToken":"` + token + `","echo":"` + body["password"] + `"}`))
+		case r.URL.Path == "/api/profile" && r.Header.Get("Authorization") == "Bearer "+token:
+			w.Header().Set("X-Echo", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"you":"` + email + `","token":"` + token + `","pw":"` + password + `"}`))
+		case r.URL.Path == "/api/profile":
+			// The defect: served without authentication. The finding it raises
+			// is what makes the authenticated exchange — the one reflecting
+			// every secret — become stored evidence.
+			_, _ = w.Write([]byte(`{"you":"anyone","token":"none","pw":"none"}`))
+		default:
+			w.WriteHeader(401)
+			_, _ = w.Write([]byte(`{"message":"unauthorized"}`))
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for name, body := range map[string]string{
+		"openapi.json": spec,
+		".env.sulayi.local": "ALICE_EMAIL=" + email + "\nALICE_PASSWORD=\"" + password + "\"\n" +
+			"DB_PASSWORD=" + unrelated + "\n",
+		"sulayi.yaml": "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
+			"discovery:\n  probeWellKnownPaths: false\n" +
+			"identities:\n  - id: alice\n    role: member\n    authentication:\n      type: login\n" +
+			"      login:\n        path: /api/auth/login\n        body:\n" +
+			"          identifier: {env: ALICE_EMAIL}\n          password: {env: ALICE_PASSWORD}\n" +
+			"        session: {bearer: /accessToken}\n" +
+			"    liveness: {method: GET, path: /api/profile}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, out, errOut := run(t, "attack", "--spec", "openapi.json", "--env", ".env.sulayi.local")
+	if logins.Load() == 0 {
+		t.Fatalf("the identity never signed in\nstdout: %s\nstderr: %s", out, errOut)
+	}
+	if !strings.Contains(errOut, "1 other entr(ies) ignored") {
+		t.Errorf("stderr does not say the unreferenced entry was ignored:\n%s", errOut)
+	}
+	if strings.Contains(errOut, "UNUSABLE") || strings.Contains(out, "UNUSABLE") {
+		t.Errorf("the identity did not sign in:\n%s\n%s", out, errOut)
+	}
+	secrets := []string{password, unrelated, token, cookie, email}
+	for _, s := range secrets {
+		if strings.Contains(out, s) || strings.Contains(errOut, s) {
+			t.Errorf("the terminal shows %q", s)
+		}
+	}
+	reports, _ := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "report.json"))
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d", len(reports))
+	}
+	evidence, _ := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "evidence", "*"))
+	if len(evidence) == 0 {
+		t.Fatal("no evidence was stored, so this search would prove nothing")
+	}
+	rep, _ := os.ReadFile(reports[0])
+	if !strings.Contains(string(rep), `"role": "member"`) || !strings.Contains(string(rep), `"usable": true`) {
+		t.Errorf("the report does not show a usable member identity")
+	}
+	_ = filepath.Walk(filepath.Join(dir, ".sulayi"), func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		b, _ := os.ReadFile(p)
+		for _, s := range secrets {
+			if bytes.Contains(b, []byte(s)) {
+				t.Errorf("%s contains %q", filepath.Base(p), s)
+			}
+		}
+		return nil
+	})
+}
+
+// A credentials file git tracks stops the run before anything is sent.
+func TestTrackedEnvFileStopsTheRun(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.email", "t@example.test"}, {"config", "user.name", "t"}} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(".env.sulayi.local", []byte("T=x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-f", ".env.sulayi.local"}, {"commit", "-q", "-m", "x"}} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	code, _, errOut := run(t, "attack", srv.URL, "--env", ".env.sulayi.local")
+	if code != ExitUsage || !strings.Contains(errOut, "tracked by git") {
+		t.Fatalf("exit = %d, stderr = %q; want a usage refusal", code, errOut)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("the target received %d request(s)", hits.Load())
+	}
+	if _, err := os.Stat(".sulayi"); err == nil {
+		t.Error("a run directory was created for a run that was refused")
 	}
 }

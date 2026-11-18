@@ -293,9 +293,11 @@ func (l *ledger) add(e model.CoverageEntry) {
 }
 
 // authPathHints match routes where an unauthenticated sweep risks locking real
-// accounts or burning one-time codes.
+// accounts or burning one-time codes, and sign-out routes, where an
+// authenticated control request would end the very session the run depends on.
 var authPathHints = []string{
 	"login", "signin", "sign-in", "authenticate", "auth/token", "oauth",
+	"logout", "signout", "sign-out",
 	"register", "signup", "sign-up", "password", "forgot", "reset",
 	"verify", "otp", "mfa", "2fa", "token/refresh", "refresh-token",
 }
@@ -383,9 +385,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 				(looksLikeAuthRoute(op.PathTemplate) || looksLikeAuthRoute(op.AbsolutePath())) {
 				base.Disposition = model.DispositionUntested
 				base.Cause = model.CauseSafetyPolicy
-				base.Detail = "skipped because the path looks like an authentication route; " +
-					"sweeping these can lock real accounts. Set assessment.excludeAuthEndpoints " +
-					"to false to include them"
+				base.Detail = "skipped because the path looks like an authentication or sign-out route; " +
+					"sweeping these can lock real accounts or end the session the run depends on. " +
+					"Set assessment.excludeAuthEndpoints to false to include them"
 				lg.add(base)
 				continue
 			}
@@ -872,30 +874,38 @@ func identityCoverage(statuses []identity.Status) []model.CoverageEntry {
 // is only ever raised by an anonymous success, never by an authenticated
 // failure.
 func invalidateExpiredControls(res *Result, uses []controlUse, statuses []identity.Status) {
-	windows := make(map[string]identity.Status, len(statuses))
+	byID := make(map[string]identity.Status, len(statuses))
 	for _, st := range statuses {
-		if _, _, ok := st.UncertaintyWindow(); ok {
-			windows[st.ID] = st
+		if len(st.AllWindows()) > 0 {
+			byID[st.ID] = st
 		}
 	}
-	if len(windows) == 0 || len(uses) == 0 {
+	if len(byID) == 0 || len(uses) == 0 {
 		return
 	}
 
+	// A control is affected when it completed inside any window in which its
+	// identity's credential may not have been valid: after the last
+	// confirmed-good canary, and before the identity was confirmed good again.
+	// A login identity that signed in again has closed windows; one that did
+	// not has an open one.
 	type key struct{ subject, checkID, resourceID string }
-	affected := make(map[key]identity.Status)
+	type hit struct {
+		st identity.Status
+		w  identity.Window
+	}
+	affected := make(map[key]hit)
 	for _, u := range uses {
-		st, bad := windows[u.identityID]
-		if !bad {
+		st, ok := byID[u.identityID]
+		if !ok {
 			continue
 		}
-		lastGood, _, _ := st.UncertaintyWindow()
-		// A control that completed at or before the last good canary is backed
-		// by a credential that was confirmed working afterwards.
-		if !u.at.IsZero() && !lastGood.IsZero() && !u.at.After(lastGood) {
-			continue
+		for _, w := range st.AllWindows() {
+			if u.at.IsZero() || w.Contains(u.at) {
+				affected[key{u.subject, u.checkID, u.resourceID}] = hit{st, w}
+				break
+			}
 		}
-		affected[key{u.subject, u.checkID, u.resourceID}] = st
 	}
 	if len(affected) == 0 {
 		return
@@ -906,28 +916,28 @@ func invalidateExpiredControls(res *Result, uses []controlUse, statuses []identi
 		if e.Dimension != DimensionOperation && e.Dimension != DimensionOwnership {
 			continue
 		}
-		st, hit := affected[key{e.Subject, e.CheckID, e.ResourceID}]
-		if !hit {
+		h, ok := affected[key{e.Subject, e.CheckID, e.ResourceID}]
+		if !ok {
 			continue
 		}
 		e.Disposition = model.DispositionBlocked
 		e.Cause = model.CauseAuthenticationFailed
-		e.Detail = e.Detail + ". This result is withdrawn: identity " + st.ID +
-			" was found invalid at " + st.FirstBad.UTC().Format(time.RFC3339) +
+		e.Detail = e.Detail + ". This result is withdrawn: identity " + h.st.ID +
+			" was found invalid at " + h.w.FirstBad.UTC().Format(time.RFC3339) +
 			", and the authenticated control it relied on ran after the last confirmed-good canary at " +
-			lastGoodLabel(st) + ", so the credential may already have expired when it was used"
+			windowStartLabel(h.w) + windowEndLabel(h.w) + ", so the credential may not have been valid when it was used"
 	}
 
 	for i := range res.Findings {
 		f := &res.Findings[i]
-		st, hit := affected[key{f.OperationID, f.CheckID, f.ResourceID}]
-		if !hit {
+		h, ok := affected[key{f.OperationID, f.CheckID, f.ResourceID}]
+		if !ok {
 			continue
 		}
-		note := "authenticated-control-request: identity " + st.ID + " was found invalid at " +
-			st.FirstBad.UTC().Format(time.RFC3339) + "; the control that corroborated this finding ran " +
-			"after the last confirmed-good canary at " + lastGoodLabel(st) + ", so the corroboration " +
-			"is withdrawn and the finding is reported as suspected"
+		note := "authenticated-control-request: identity " + h.st.ID + " was found invalid at " +
+			h.w.FirstBad.UTC().Format(time.RFC3339) + "; the control that corroborated this finding ran " +
+			"after the last confirmed-good canary at " + windowStartLabel(h.w) + windowEndLabel(h.w) +
+			", so the corroboration is withdrawn and the finding is reported as suspected"
 		f.Verification.Unavailable = append(f.Verification.Unavailable, note)
 		if f.State == model.StateConfirmed {
 			f.State = model.StateSuspected
@@ -936,13 +946,20 @@ func invalidateExpiredControls(res *Result, uses []controlUse, statuses []identi
 	}
 }
 
-// lastGoodLabel renders the last confirmed-good time, or says plainly that
-// there was never one.
-func lastGoodLabel(st identity.Status) string {
-	if st.LastGood.IsZero() {
+// windowStartLabel renders a window's start, or says there was none.
+func windowStartLabel(w identity.Window) string {
+	if w.From.IsZero() {
 		return "no point at all — the identity was never confirmed good"
 	}
-	return st.LastGood.UTC().Format(time.RFC3339)
+	return w.From.UTC().Format(time.RFC3339)
+}
+
+// windowEndLabel says when the identity was confirmed good again, if it was.
+func windowEndLabel(w identity.Window) string {
+	if w.To.IsZero() {
+		return ""
+	}
+	return " and before it signed in again and was confirmed good at " + w.To.UTC().Format(time.RFC3339)
 }
 
 // ownershipFindingID builds a stable identifier for a cross-owner finding.

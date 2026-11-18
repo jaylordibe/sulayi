@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jaylordibe/sulayi/internal/config"
+	"github.com/jaylordibe/sulayi/internal/identity"
 	"github.com/jaylordibe/sulayi/internal/scanner"
 	"github.com/jaylordibe/sulayi/internal/scanner/nuclei"
 	"github.com/jaylordibe/sulayi/internal/scanner/sast"
@@ -31,7 +32,7 @@ type engineTool struct {
 }
 
 func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
-	var configPath string
+	var configPath, envFile string
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Report what is available and what each missing piece would unlock",
@@ -48,7 +49,7 @@ func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
 				fmt.Fprintf(stdout, "  %-22s %s\n", "file permissions", "NOT enforced on this platform")
 			}
 
-			reportIdentities(stdout, configPath)
+			reportIdentities(stdout, configPath, envFile)
 
 			reportEngines(cmd.Context(), stdout, configPath)
 
@@ -72,6 +73,7 @@ func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to sulayi.yaml (default: ./sulayi.yaml if present)")
+	cmd.Flags().StringVar(&envFile, "env", "", "credentials file to check, as sulayi attack --env reads it")
 	return cmd
 }
 
@@ -85,7 +87,7 @@ func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
 // This deliberately does not contact the target. Checking whether a credential
 // is *accepted* is the liveness canary's job during a run; doing it here would
 // turn a local diagnostic into an unannounced authenticated request.
-func reportIdentities(stdout io.Writer, configPath string) {
+func reportIdentities(stdout io.Writer, configPath, envFile string) {
 	path := configPath
 	if path == "" {
 		if _, err := os.Stat("sulayi.yaml"); err != nil {
@@ -100,6 +102,21 @@ func reportIdentities(stdout io.Writer, configPath string) {
 		fmt.Fprintf(stdout, "  %-22s %s\n", "configuration", "could not be read; run a scan for the full error")
 		return
 	}
+	lookup := identity.ProcessEnv
+	if envFile != "" {
+		creds, err := identity.LoadEnvFile(envFile, cfg.CredentialEnvNames())
+		if err != nil {
+			fmt.Fprintf(stdout, "  %-22s %v\n", "credentials file", err)
+		} else {
+			lookup = creds.Lookup
+			fmt.Fprintf(stdout, "  %-22s %s (%d referenced name(s) defined, %d other entr(ies) ignored)\n",
+				"credentials file", creds.Path(), len(cfg.CredentialEnvNames())-missingIn(creds, cfg.CredentialEnvNames()),
+				creds.Ignored)
+			for _, w := range creds.Warnings {
+				fmt.Fprintf(stdout, "  %-22s warning: %s\n", "", w)
+			}
+		}
+	}
 	ids := cfg.IdentityModels()
 	if len(ids) == 0 {
 		fmt.Fprintf(stdout, "  %-22s %s\n", "none configured",
@@ -108,8 +125,31 @@ func reportIdentities(stdout io.Writer, configPath string) {
 	}
 	for _, id := range ids {
 		label := id.ID
+		if id.Role != "" {
+			label += " (" + id.Role + ")"
+		}
+		if id.Auth.Scheme == identity.SchemeLogin && id.Auth.Login != nil {
+			method, _, _, _ := id.LoginRequest(cfg.Target.BaseURL)
+			status := "login fields configured"
+			for _, f := range id.Auth.Login.Fields {
+				if f.FromPreflight != "" {
+					continue
+				}
+				if _, rerr := f.Source.ResolveWith(lookup); rerr != nil {
+					status = "login field " + f.Name + " unavailable: " + rerr.Error()
+					break
+				}
+			}
+			fmt.Fprintf(stdout, "  %-22s %s (login %s %s; doctor does not sign in)\n", label, status,
+				method, id.Auth.Login.Path)
+			if !id.Live.Configured() {
+				fmt.Fprintf(stdout, "  %-22s %s\n", "",
+					"no liveness canary; an expired session could not be detected or recovered")
+			}
+			continue
+		}
 		status := "credential source configured"
-		if _, rerr := id.Auth.Credential.Resolve(); rerr != nil {
+		if _, rerr := id.Auth.Credential.ResolveWith(lookup); rerr != nil {
 			status = "credential unavailable: " + rerr.Error()
 		}
 		fmt.Fprintf(stdout, "  %-22s %s (%s)\n", label, status, id.Auth.Credential.Describe())

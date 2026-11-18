@@ -48,6 +48,24 @@ consumer can detect a change rather than misparse.
   `run.requests`, `run.requestLimit`, `run.cleanupRequests` and `run.stoppedEarly`.
 - **Request log.** `requests.jsonl`: one redacted line per request, refused ones included.
 - An identity's credential is sent only to its target's origin.
+- **Login identities** (`authentication.type: login`, [ADR-0020](docs/adr/0020-login-identities-and-credentials-files.md)):
+  sign in through the application's own login request — a JSON or form body built from
+  references, an optional GET/HEAD preflight, and a session that is a bearer token read
+  by JSON pointer or the cookies the login sets, with optional CSRF cookie-to-header.
+  The configured login is the one state-changing request every profile permits, and
+  only through the HTTP client's authentication path.
+- **`--env <file>`** on `attack` and `doctor`: a credentials file from which only the
+  names `sulayi.yaml` references are read, held in memory and never exported. A file git
+  tracks is refused; an unignored or loosely permissioned one is warned about.
+- **Bounded re-authentication**: a login identity signs in again when its canary answers
+  401 or 419, at most three times a run, one at a time; the failed request is never
+  replayed, and results from every dead interval are withdrawn.
+- `identities[].role`, reported in the terminal and in `report.json` with
+  `reauthentications` and `untrustedIntervals`.
+- Sign-out routes (`logout`, `signout`, `sign-out`) are excluded from the sweep by
+  default, so an authenticated control request cannot end the run's session.
+- Reference-application login configurations in `evals/reference/`, run by the
+  reference workflow against the seeded accounts of both starters.
 
 ### Fixed
 

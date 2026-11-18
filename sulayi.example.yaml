@@ -60,9 +60,32 @@ identities:
   # against what a legitimate caller receives, which is the only way a finding
   # reaches "confirmed". Without one, findings stay "suspected" and say so.
   #
-  # Supported types are bearer and apiKey. OAuth2, OIDC, browser login and
-  # cookie-session flows are not implemented.
+  # Types are login (sign in through the application's own login), bearer and
+  # apiKey (a token you supply). OAuth2 authorization flows, OIDC, MFA and
+  # browser login are not supported. Credentials can live in a git-ignored file
+  # passed with --env; only the names referenced here are read from it.
   []
+  # - id: alice
+  #   role: member                    # reported only; grants nothing
+  #   authentication:
+  #     type: login
+  #     login:
+  #       path: /api/auth/login       # a path on the target, never a URL
+  #       # form: true                # send a URL-encoded form instead of JSON
+  #       body:
+  #         identifier: { env: ALICE_EMAIL }
+  #         password: { env: ALICE_PASSWORD }
+  #       session:
+  #         bearer: /accessToken      # JSON pointer to the token; or: cookies: true
+  #       # For a cookie session with a CSRF cookie:
+  #       # preflight: { method: GET, path: /csrf-cookie }
+  #       # csrf: { cookie: XSRF-TOKEN, header: X-XSRF-TOKEN }
+  #   # Needed to notice an expired session and sign in again (on 401 or 419,
+  #   # at most three times a run; the failed request is never replayed).
+  #   liveness:
+  #     method: GET
+  #     path: /api/users/me
+  #
   # - id: admin
   #   label: Administrator
   #   authentication:

@@ -62,6 +62,20 @@ jobs:
           SULAYI_REFERENCE_SPEC: http://127.0.0.1:8000/docs/api.json
         run: go test -v -count=1 -run TestReferenceApplication ./evals/
 
+      - name: sign in as the starter's seeded accounts
+        # The starter's own .env is the credentials file: only the names the
+        # login configuration references are read from it. Both identities must
+        # sign in and pass their liveness canary.
+        run: |
+          go build -o sulayi ./cmd/sulayi
+          ./sulayi attack -c evals/reference/laravel-api-starter.sulayi.yaml \
+            --env "$RUNNER_TEMP/laravel-api/.env" --spec-url http://127.0.0.1:8000/docs/api.json -o "$RUNNER_TEMP/login-run" || true
+          report=$(ls "$RUNNER_TEMP"/login-run/runs/*/report.json)
+          jq -e '[.identities[] | select(.usable and .liveness == "good")] | length == 2' "$report" || {
+            echo "::error::the seeded accounts did not both sign in"
+            jq '.identities | map({id, role, usable, liveness, problem})' "$report"
+            exit 1; }
+
       - name: end-to-end through the CLI an operator would run
         run: |
           go build -o sulayi ./cmd/sulayi
@@ -123,3 +137,17 @@ jobs:
           SULAYI_REFERENCE_TARGET: http://127.0.0.1:3000
           SULAYI_REFERENCE_SPEC: http://127.0.0.1:3000/api/docs/json
         run: go test -v -count=1 -run TestReferenceApplication ./evals/
+
+      - name: sign in as the starter's seeded accounts
+        # The starter's own .env is the credentials file: only the names the
+        # login configuration references are read from it. Both identities must
+        # sign in and pass their liveness canary.
+        run: |
+          go build -o sulayi ./cmd/sulayi
+          ./sulayi attack -c evals/reference/nestjs-api-starter.sulayi.yaml \
+            --env "$RUNNER_TEMP/nestjs-api/.env" --spec-url http://127.0.0.1:3000/api/docs/json -o "$RUNNER_TEMP/login-run" || true
+          report=$(ls "$RUNNER_TEMP"/login-run/runs/*/report.json)
+          jq -e '[.identities[] | select(.usable and .liveness == "good")] | length == 2' "$report" || {
+            echo "::error::the seeded accounts did not both sign in"
+            jq '.identities | map({id, role, usable, liveness, problem})' "$report"
+            exit 1; }

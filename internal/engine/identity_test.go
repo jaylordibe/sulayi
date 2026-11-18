@@ -254,3 +254,54 @@ func TestProbeIdentitiesHandlesNilAndCancellation(t *testing.T) {
 	cancel()
 	probeIdentities(ctx, nil)
 }
+
+// A login identity that signed in again has a closed window. Results whose
+// authenticated control ran inside it are withdrawn, because the session may
+// already have been dead; results after it was confirmed good again stand.
+func TestInvalidationAfterRecoveryCoversOnlyTheDeadInterval(t *testing.T) {
+	recovered := identity.Status{
+		ID: "alice", Usable: true, Monitored: true, Liveness: identity.LivenessGood,
+		LastGood: time.Unix(3000, 0),
+		Windows: []identity.Window{{
+			From: time.Unix(1000, 0), FirstBad: time.Unix(2000, 0), To: time.Unix(3000, 0),
+		}},
+	}
+	res := &Result{
+		Coverage: []model.CoverageEntry{
+			{Dimension: DimensionOperation, Subject: "GET /during", CheckID: "c",
+				Disposition: model.DispositionExecuted, Detail: "ran"},
+			{Dimension: DimensionOperation, Subject: "GET /after", CheckID: "c",
+				Disposition: model.DispositionExecuted, Detail: "ran"},
+			{Dimension: DimensionOperation, Subject: "GET /before", CheckID: "c",
+				Disposition: model.DispositionExecuted, Detail: "ran"},
+		},
+		Findings: []model.Finding{
+			{OperationID: "GET /during", CheckID: "c", State: model.StateConfirmed, Confidence: model.ConfidenceHigh},
+			{OperationID: "GET /after", CheckID: "c", State: model.StateConfirmed, Confidence: model.ConfidenceHigh},
+		},
+	}
+	invalidateExpiredControls(res, []controlUse{
+		{subject: "GET /during", checkID: "c", identityID: "alice", at: time.Unix(2500, 0)},
+		{subject: "GET /after", checkID: "c", identityID: "alice", at: time.Unix(3500, 0)},
+		{subject: "GET /before", checkID: "c", identityID: "alice", at: time.Unix(900, 0)},
+	}, []identity.Status{recovered})
+
+	rows := map[string]model.CoverageEntry{}
+	for _, e := range res.Coverage {
+		rows[e.Subject] = e
+	}
+	if r := rows["GET /during"]; r.Disposition != model.DispositionBlocked || r.Cause != model.CauseAuthenticationFailed {
+		t.Errorf("a result from inside the dead interval stands: %s/%s", r.Disposition, r.Cause)
+	}
+	if !strings.Contains(rows["GET /during"].Detail, "signed in again") {
+		t.Errorf("the withdrawal does not say the identity recovered: %q", rows["GET /during"].Detail)
+	}
+	for _, s := range []string{"GET /after", "GET /before"} {
+		if rows[s].Disposition != model.DispositionExecuted {
+			t.Errorf("%s was withdrawn although it ran outside the dead interval", s)
+		}
+	}
+	if res.Findings[0].State != model.StateSuspected || res.Findings[1].State != model.StateConfirmed {
+		t.Errorf("findings = %s, %s; want suspected, confirmed", res.Findings[0].State, res.Findings[1].State)
+	}
+}

@@ -199,6 +199,12 @@ alone, and never as a claim about security.
 
 ## 8. Identities and the authenticated control (M1)
 
+> **Since S1** an identity may also sign in through the application's own login and
+> keep its session alive, from a `--env` credentials file. The design, the safety
+> exception it needs and its limits are in
+> [ADR-0020](adr/0020-login-identities-and-credentials-files.md) and threat model T-23.
+> The sections below describe the static-credential model, which is unchanged.
+
 ### The distinction the design turns on
 
 An **identity** is a security principal: a stable id, a label, and a reference to how to

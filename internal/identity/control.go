@@ -36,6 +36,7 @@ const (
 type Status struct {
 	ID     string
 	Label  string
+	Role   string
 	Scheme Scheme
 	// Source describes where the credential came from, by location only.
 	Source string
@@ -57,6 +58,41 @@ type Status struct {
 	Probes int
 	// Warnings are non-fatal observations about how the credential is stored.
 	Warnings []string
+	// Windows are the closed intervals in which this identity's results cannot
+	// be trusted: each time it was found invalid and then signed in again,
+	// from the last confirmed-good canary until it was confirmed good again.
+	// AllWindows adds the open one, while the identity is still invalid.
+	Windows []Window
+	// Reauthentications counts sign-ins after the first.
+	Reauthentications int
+}
+
+// AllWindows returns every interval in which the identity's results cannot be
+// trusted: the closed ones, and the open one while it is still invalid.
+func (s Status) AllWindows() []Window {
+	out := append([]Window(nil), s.Windows...)
+	if from, _, ok := s.UncertaintyWindow(); ok {
+		out = append(out, Window{From: from, FirstBad: s.FirstBad})
+	}
+	return out
+}
+
+// Window is one interval in which an identity's credential may not have been
+// valid. To is zero while the identity remains invalid.
+type Window struct {
+	From     time.Time
+	FirstBad time.Time
+	To       time.Time
+}
+
+// Contains reports whether an authenticated request completed at t falls in
+// the window: after the last confirmed-good canary, and before the identity
+// was confirmed good again.
+func (w Window) Contains(t time.Time) bool {
+	if !w.From.IsZero() && !t.After(w.From) {
+		return false
+	}
+	return w.To.IsZero() || !t.After(w.To)
 }
 
 // UncertaintyWindow reports the interval in which authenticated results cannot
@@ -89,6 +125,10 @@ type Control struct {
 	baseURL string
 	client  *httpx.Client
 
+	// red and lookup are used to sign in, and to sign in again.
+	red    *redact.Redactor
+	lookup Lookup
+
 	mu       sync.Mutex
 	state    LivenessState
 	lastGood time.Time
@@ -96,6 +136,12 @@ type Control struct {
 	probes   int
 	problem  string
 	warnings []string
+	// sess is the session a login identity holds; signedIn reports that one
+	// was established.
+	sess     session
+	signedIn bool
+	reauths  int
+	windows  []Window
 	// probing serialises canary probes so that a burst of suspicious responses
 	// produces one probe rather than one per goroutine.
 	probing bool
@@ -110,20 +156,43 @@ func (c *Control) Status() Status {
 	defer c.mu.Unlock()
 	w := make([]string, len(c.warnings))
 	copy(w, c.warnings)
+	windows := append([]Window(nil), c.windows...)
 	return Status{
-		ID:        c.id.ID,
-		Label:     c.id.Label,
-		Scheme:    c.id.Auth.Scheme,
-		Source:    c.id.Auth.Credential.Describe(),
-		Usable:    !c.secret.Empty(),
-		Problem:   c.problem,
-		Monitored: c.id.Live.Configured(),
-		Liveness:  c.state,
-		LastGood:  c.lastGood,
-		FirstBad:  c.firstBad,
-		Probes:    c.probes,
-		Warnings:  w,
+		ID:                c.id.ID,
+		Label:             c.id.Label,
+		Role:              c.id.Role,
+		Scheme:            c.id.Auth.Scheme,
+		Source:            c.describeSource(),
+		Usable:            c.hasCredentialLocked(),
+		Problem:           c.problem,
+		Monitored:         c.id.Live.Configured(),
+		Liveness:          c.state,
+		LastGood:          c.lastGood,
+		FirstBad:          c.firstBad,
+		Probes:            c.probes,
+		Warnings:          w,
+		Windows:           windows,
+		Reauthentications: c.reauths,
 	}
+}
+
+// describeSource names where the identity's credential comes from, never what
+// it is.
+func (c *Control) describeSource() string {
+	if c.id.Auth.Scheme == SchemeLogin && c.id.Auth.Login != nil {
+		method, _, _, _ := c.id.LoginRequest(c.baseURL)
+		return "login " + method + " " + c.id.Auth.Login.Path
+	}
+	return c.id.Auth.Credential.Describe()
+}
+
+// hasCredentialLocked reports whether the identity has something to present.
+// The caller holds c.mu.
+func (c *Control) hasCredentialLocked() bool {
+	if c.id.Auth.Scheme == SchemeLogin {
+		return c.signedIn
+	}
+	return !c.secret.Empty()
 }
 
 // Headers returns a freshly allocated header map carrying this identity's
@@ -133,6 +202,11 @@ func (c *Control) Status() Status {
 // returning a shared map would let one goroutine's request mutate another's, and
 // would let a credential outlive the request it was built for.
 func (c *Control) Headers() map[string][]string {
+	if c.id.Auth.Scheme == SchemeLogin {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.sess.headers(c.id.Auth.Login)
+	}
 	h := make(map[string][]string, 1)
 	switch c.id.Auth.Scheme {
 	case SchemeBearer:
@@ -152,8 +226,11 @@ func (c *Control) Headers() map[string][]string {
 func (c *Control) Usable() (bool, model.BlockedCause, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.secret.Empty() {
+	if !c.hasCredentialLocked() {
 		detail := "the credential for identity " + c.id.ID + " could not be resolved"
+		if c.id.Auth.Scheme == SchemeLogin {
+			detail = "identity " + c.id.ID + " could not sign in"
+		}
 		if c.problem != "" {
 			detail += ": " + c.problem
 		}
@@ -259,10 +336,83 @@ func (c *Control) Probe(ctx context.Context) LivenessState {
 	return c.probe(ctx)
 }
 
-// probe performs the canary request and records what it learned.
+// authenticationFailure lists the canary statuses that mean the session is no
+// longer accepted, as opposed to a request the identity is not allowed to make.
+// Only these trigger a new sign-in: a 403 is an authorization decision, and
+// signing in again would change nothing but the load on the login endpoint.
+// 419 is Laravel's expired-session status.
+var authenticationFailure = map[int]bool{401: true, 419: true}
+
+// probe performs the canary request and records what it learned. For a login
+// identity whose session the target no longer accepts, it signs in again —
+// bounded, and with the caller already holding the probing flag, so at most
+// one sign-in per identity is ever in flight.
+//
+// It never replays the request that looked suspicious. A request that failed
+// while the session was dead stays failed, and the window in which that
+// happened is recorded so its results are withdrawn rather than trusted.
 func (c *Control) probe(ctx context.Context) LivenessState {
-	if c.secret.Empty() {
-		return LivenessUnknown
+	state, status := c.probeOnce(ctx)
+	if state != LivenessBad || c.id.Auth.Scheme != SchemeLogin {
+		return state
+	}
+	if !authenticationFailure[status] {
+		c.mu.Lock()
+		c.problem += fmt.Sprintf("; %d is an authorization response, not an expired session, so the "+
+			"identity was not signed in again", status)
+		c.mu.Unlock()
+		return state
+	}
+
+	c.mu.Lock()
+	if c.reauths >= MaxReauthentications {
+		c.problem += fmt.Sprintf("; the identity has already signed in again %d times this run, which is "+
+			"the limit", MaxReauthentications)
+		c.mu.Unlock()
+		return state
+	}
+	c.reauths++
+	c.mu.Unlock()
+
+	sess, err := signIn(ctx, c.client, c.red, c.id, c.baseURL, c.lookup)
+	if err != nil {
+		c.mu.Lock()
+		c.problem += "; signing in again failed: " + err.Error()
+		c.mu.Unlock()
+		return LivenessBad
+	}
+	c.mu.Lock()
+	c.sess = sess
+	c.mu.Unlock()
+
+	// The new session counts only once the canary accepts it.
+	from, firstBad := c.window()
+	state, _ = c.probeOnce(ctx)
+	if state == LivenessGood {
+		c.mu.Lock()
+		c.windows = append(c.windows, Window{From: from, FirstBad: firstBad, To: c.lastGood})
+		c.firstBad = time.Time{}
+		c.mu.Unlock()
+	}
+	return state
+}
+
+// window returns the start of the current invalid period and when it was
+// first observed.
+func (c *Control) window() (time.Time, time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastGood, c.firstBad
+}
+
+// probeOnce sends the canary and records the outcome, returning the state and
+// the canary's status (zero when it got no response).
+func (c *Control) probeOnce(ctx context.Context) (LivenessState, int) {
+	c.mu.Lock()
+	ok := c.hasCredentialLocked()
+	c.mu.Unlock()
+	if !ok {
+		return LivenessUnknown, 0
 	}
 	method := strings.ToUpper(strings.TrimSpace(c.id.Live.Method))
 	if method == "" {
@@ -287,15 +437,15 @@ func (c *Control) probe(ctx context.Context) LivenessState {
 		c.problem = "the liveness canary could not be completed: " + ex.Err
 		if c.state == LivenessGood {
 			// Keep the last good observation; the identity is not known bad.
-			return c.state
+			return c.state, 0
 		}
 		c.state = LivenessUnknown
-		return c.state
+		return c.state, 0
 	case c.id.Live.Accepts(ex.Response.Status):
 		c.state = LivenessGood
 		c.lastGood = time.Now()
 		c.problem = ""
-		return c.state
+		return c.state, ex.Response.Status
 	default:
 		c.state = LivenessBad
 		if c.firstBad.IsZero() {
@@ -303,7 +453,7 @@ func (c *Control) probe(ctx context.Context) LivenessState {
 		}
 		c.problem = fmt.Sprintf("the liveness canary %s %s returned %d, which is not an accepted status",
 			method, c.id.Live.Path, ex.Response.Status)
-		return c.state
+		return c.state, ex.Response.Status
 	}
 }
 
@@ -361,6 +511,30 @@ func (s *Set) ByID(id string) (*Control, bool) {
 	return c, ok
 }
 
+// SignIn signs every login identity in. An identity that cannot sign in is
+// kept, unusable, with the reason: its work is then blocked rather than run
+// anonymously.
+func (s *Set) SignIn(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	for _, c := range s.controls {
+		if c.id.Auth.Scheme != SchemeLogin {
+			continue
+		}
+		sess, err := signIn(ctx, c.client, c.red, c.id, c.baseURL, c.lookup)
+		c.mu.Lock()
+		if err != nil {
+			c.problem = err.Error()
+		} else {
+			c.sess = sess
+			c.signedIn = true
+			c.problem = ""
+		}
+		c.mu.Unlock()
+	}
+}
+
 // Statuses returns a snapshot of every identity.
 func (s *Set) Statuses() []Status {
 	if s == nil {
@@ -381,6 +555,18 @@ func (s *Set) Statuses() []Status {
 // it is unusable, and the run must be able to say so in the ledger rather than
 // quietly proceeding anonymously.
 func Resolve(ids []Identity, baseURL string, client *httpx.Client, red *redact.Redactor) *Set {
+	return ResolveWith(ids, baseURL, client, red, ProcessEnv)
+}
+
+// ResolveWith is Resolve with an explicit credential lookup, such as the
+// process environment followed by a --env file.
+//
+// A login identity is not signed in here; SignIn does that, once the safety
+// guard knows its login request.
+func ResolveWith(ids []Identity, baseURL string, client *httpx.Client, red *redact.Redactor, lookup Lookup) *Set {
+	if lookup == nil {
+		lookup = ProcessEnv
+	}
 	set := &Set{byID: make(map[string]*Control, len(ids))}
 	for _, id := range ids {
 		c := &Control{
@@ -388,6 +574,17 @@ func Resolve(ids []Identity, baseURL string, client *httpx.Client, red *redact.R
 			baseURL: baseURL,
 			client:  client,
 			state:   LivenessUnknown,
+			red:     red,
+			lookup:  lookup,
+		}
+		if id.Auth.Scheme == SchemeLogin {
+			if !id.Live.Configured() {
+				c.warnings = append(c.warnings, "no liveness canary is configured, so an expired session "+
+					"cannot be detected or recovered by signing in again")
+			}
+			set.controls = append(set.controls, c)
+			set.byID[id.ID] = c
+			continue
 		}
 
 		if id.Auth.Scheme == SchemeAPIKey && id.Auth.Header != "" {
@@ -397,7 +594,7 @@ func Resolve(ids []Identity, baseURL string, client *httpx.Client, red *redact.R
 			red.RegisterSensitiveHeader(id.Auth.Header)
 		}
 
-		secret, err := id.Auth.Credential.Resolve()
+		secret, err := id.Auth.Credential.ResolveWith(lookup)
 		if err != nil {
 			c.problem = err.Error()
 		} else {

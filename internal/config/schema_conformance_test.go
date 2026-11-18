@@ -58,6 +58,40 @@ func validateAgainstSchema(t *testing.T, schema *jsonschema.Schema, doc string) 
 
 // validDocuments must be accepted by both the parser and the schema.
 var validDocuments = map[string]string{
+	"login identities with a bearer token and a cookie session": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://localhost:3000
+identities:
+  - id: admin
+    role: admin
+    authentication:
+      type: login
+      login:
+        path: /api/auth/login
+        body:
+          identifier: {env: SEED_ADMIN_EMAIL}
+          password: {env: SEED_ADMIN_PASSWORD}
+        session:
+          bearer: /accessToken
+    liveness: {method: GET, path: /api/users/me}
+  - id: member
+    role: member
+    authentication:
+      type: login
+      login:
+        method: POST
+        path: /login
+        form: true
+        preflight: {method: GET, path: /csrf}
+        body:
+          email: {file: /run/secrets/member-email}
+          password: {env: MEMBER_PASSWORD}
+          token: {fromPreflight: /csrfToken}
+        session:
+          cookies: true
+        csrf: {cookie: XSRF-TOKEN, header: X-XSRF-TOKEN}
+`,
 	"surface discovery, every field set": `
 apiVersion: sulayi/v1alpha1
 target:
@@ -224,6 +258,82 @@ assessment:
 // structurallyInvalidDocuments must be rejected by BOTH, because each violation
 // is expressible in the schema.
 var structurallyInvalidDocuments = map[string]string{
+	"login with a credential as well": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+identities:
+  - id: a
+    authentication:
+      type: login
+      credential: {env: TOKEN}
+      login:
+        path: /login
+        body: {password: {env: P}}
+        session: {bearer: /token}
+`,
+	"login sent with GET": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+identities:
+  - id: a
+    authentication:
+      type: login
+      login:
+        method: GET
+        path: /login
+        body: {password: {env: P}}
+        session: {bearer: /token}
+`,
+	"login to another origin": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+identities:
+  - id: a
+    authentication:
+      type: login
+      login:
+        path: //evil.test/login
+        body: {password: {env: P}}
+        session: {bearer: /token}
+`,
+	"login field with a literal value": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+identities:
+  - id: a
+    authentication:
+      type: login
+      login:
+        path: /login
+        body: {password: {value: hunter2}}
+        session: {bearer: /token}
+`,
+	"login with both session kinds": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+identities:
+  - id: a
+    authentication:
+      type: login
+      login:
+        path: /login
+        body: {password: {env: P}}
+        session: {bearer: /token, cookies: true}
+`,
+	"bearer without a credential": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+identities:
+  - id: a
+    authentication:
+      type: bearer
+`,
 	"unknown top-level field": `
 apiVersion: sulayi/v1alpha1
 target:
@@ -654,5 +764,35 @@ func TestExampleConfigIsValid(t *testing.T) {
 	}
 	if err := validateAgainstSchema(t, compileSchema(t), string(raw)); err != nil {
 		t.Fatalf("the shipped example does not validate against the schema:\n%v", err)
+	}
+}
+
+// The reference-application login configurations are run by CI against the real
+// starters; each must parse and validate here, so a schema change cannot break
+// them unnoticed.
+func TestReferenceLoginConfigsAreValid(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "evals", "reference", "*.sulayi.yaml"))
+	if err != nil || len(paths) < 2 {
+		t.Fatalf("reference login configurations = %v (%v), want both starters", paths, err)
+	}
+	schema := compileSchema(t)
+	for _, p := range paths {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Parse(bytes.NewReader(raw), filepath.Base(p))
+		if err != nil {
+			t.Errorf("%s does not parse: %v", p, err)
+			continue
+		}
+		if err := validateAgainstSchema(t, schema, string(raw)); err != nil {
+			t.Errorf("%s does not validate against the schema:\n%v", p, err)
+		}
+		for _, id := range cfg.IdentityModels() {
+			if id.Auth.Scheme != "login" || !id.Live.Configured() {
+				t.Errorf("%s: identity %s must be a login identity with a canary", p, id.ID)
+			}
+		}
 	}
 }

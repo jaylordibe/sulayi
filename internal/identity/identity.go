@@ -12,11 +12,11 @@ import (
 
 // Scheme is how a credential is presented to the target.
 //
-// The set is deliberately tiny. OAuth2 flows, OIDC, browser login, cookie
-// session establishment and refresh rotation are all out of scope for M1: each
-// needs multi-step state, and a half-implemented login flow that silently falls
-// back to anonymous is precisely the false-assurance failure this project
-// exists to prevent.
+// bearer and apiKey present a credential the operator supplies. login signs in
+// through the application's own login request (see Login) and presents the
+// bearer token or cookie session it issues. OAuth2 authorization flows, OIDC,
+// browser login and refresh-token rotation are out of scope: an identity whose
+// sign-in fails is unusable and its work is blocked, never run anonymously.
 type Scheme string
 
 const (
@@ -27,7 +27,7 @@ const (
 )
 
 // Valid reports whether s is a supported scheme.
-func (s Scheme) Valid() bool { return s == SchemeBearer || s == SchemeAPIKey }
+func (s Scheme) Valid() bool { return s == SchemeBearer || s == SchemeAPIKey || s == SchemeLogin }
 
 // AnonymousID is the reserved id of the always-available identity that presents
 // no credentials. It may not be configured.
@@ -119,15 +119,22 @@ func (s CredentialSource) Validate(path string) []string {
 // The returned error names the location and never the value, so that a
 // resolution failure can be printed, logged and stored without becoming the
 // leak it is reporting.
-func (s CredentialSource) Resolve() (Secret, error) {
+func (s CredentialSource) Resolve() (Secret, error) { return s.ResolveWith(ProcessEnv) }
+
+// ResolveWith reads the credential, looking named values up with lookup — the
+// process environment, or the process environment and then a --env file.
+func (s CredentialSource) ResolveWith(lookup Lookup) (Secret, error) {
+	if lookup == nil {
+		lookup = ProcessEnv
+	}
 	switch {
 	case s.Env != "":
-		v, ok := os.LookupEnv(s.Env)
+		v, ok := lookup(s.Env)
 		if !ok {
-			return Secret{}, fmt.Errorf("environment variable %s is not set", s.Env)
+			return Secret{}, fmt.Errorf("%s is not set in the environment or the credentials file", s.Env)
 		}
 		if strings.TrimSpace(v) == "" {
-			return Secret{}, fmt.Errorf("environment variable %s is set but empty", s.Env)
+			return Secret{}, fmt.Errorf("%s is set but empty", s.Env)
 		}
 		return NewSecret(v), nil
 	case s.File != "":
@@ -165,6 +172,8 @@ type Authentication struct {
 	// applications expecting e.g. "Token <key>" in a custom header.
 	ValuePrefix string
 	Credential  CredentialSource
+	// Login is the sign-in flow for the login scheme.
+	Login *Login
 }
 
 // Liveness configures the canary that establishes whether an identity is still
@@ -208,7 +217,10 @@ func (l Liveness) Accepts(status int) bool {
 type Identity struct {
 	ID    string
 	Label string
-	Auth  Authentication
+	// Role is an optional label for what the identity is in the application —
+	// admin, member, viewer. It is reported, and grants nothing.
+	Role string
+	Auth Authentication
 	// Live configures the liveness canary. Optional.
 	Live Liveness
 }
@@ -229,8 +241,12 @@ func (i Identity) Validate(path string) []string {
 	}
 
 	if !i.Auth.Scheme.Valid() {
-		problems = append(problems, fmt.Sprintf("%s.authentication.type %q is not one of bearer, apiKey",
+		problems = append(problems, fmt.Sprintf("%s.authentication.type %q is not one of bearer, apiKey, login",
 			path, i.Auth.Scheme))
+	}
+	if i.Role != "" && !idPattern.MatchString(i.Role) {
+		problems = append(problems, fmt.Sprintf("%s.role %q must be 1-64 characters of lowercase letters, "+
+			"digits, hyphen or underscore", path, i.Role))
 	}
 
 	switch i.Auth.Scheme {
@@ -258,7 +274,21 @@ func (i Identity) Validate(path string) []string {
 		}
 	}
 
-	problems = append(problems, i.Auth.Credential.Validate(path+".authentication.credential")...)
+	if i.Auth.Scheme == SchemeLogin {
+		if i.Auth.Credential.Env != "" || i.Auth.Credential.File != "" {
+			problems = append(problems, path+".authentication.credential does not apply to the login type; "+
+				"its credentials are the login body fields")
+		}
+		if i.Auth.Header != "" || i.Auth.ValuePrefix != "" {
+			problems = append(problems, path+".authentication.header and valuePrefix do not apply to the login type")
+		}
+		problems = append(problems, validateLogin(path+".authentication", i.Auth.Login)...)
+	} else {
+		if i.Auth.Login != nil {
+			problems = append(problems, path+".authentication.login applies only to the login type")
+		}
+		problems = append(problems, i.Auth.Credential.Validate(path+".authentication.credential")...)
+	}
 
 	if i.Live.Configured() {
 		if !strings.HasPrefix(i.Live.Path, "/") {

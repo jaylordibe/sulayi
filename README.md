@@ -20,8 +20,8 @@ request it sends.
 
 > [!IMPORTANT]
 > **Sulayi is early-stage (v0.x, unreleased).** Today it tests authentication and
-> object-level authorization on APIs that publish an OpenAPI document. Injection testing,
-> crawling and login flows are planned, not built. See [Status](#status).
+> object-level authorization on APIs that publish an OpenAPI document, signing in as your
+> test accounts. Injection testing and crawling are planned, not built. See [Status](#status).
 
 ---
 
@@ -134,7 +134,8 @@ compare against. [Add identities](#identities) and the same defect can be confir
 | Undocumented surface hints from `Link`, `robots.txt` and the app's own JavaScript | Implemented (recorded, not tested) |
 | Source analysis with your own opengrep/Semgrep rules | Experimental — Semgrep itself never executed |
 | Nuclei and ZAP integrations | Built, **currently blocked** (see [Safety](#safety)) |
-| Login flows, cookie sessions, multiple roles, `--env` credential files | Planned |
+| Signing in through the app's own login: bearer token or cookie session (with CSRF), `--env` credentials files, roles, bounded re-authentication | Implemented — bearer logins are run against the Laravel Passport and NestJS JWT reference starters by the reference workflow; cookie sessions and CSRF are tested on local fixtures only |
+| Testing across roles (function-level authorization) | Planned |
 | Testing applications without an OpenAPI document (crawling) | Planned |
 | Injection and misconfiguration checks | Planned |
 | `sulayi report`, `sulayi verify <finding-id>` | Planned |
@@ -160,6 +161,7 @@ sulayi version        # version, Go toolchain and platform
 | `--no-probe` | do not look for a specification at well-known paths |
 | `-c, --config <file>` | configuration file (default `./sulayi.yaml` if present) |
 | `-o, --output <dir>` | run output directory (default `.sulayi`) |
+| `--env <file>` | credentials file of `NAME=value` lines; only names `sulayi.yaml` references are read |
 | `--yes` | confirm `aggressive` where there is no terminal; changes nothing else |
 
 ### Exit codes
@@ -187,35 +189,53 @@ Run `sulayi init` for a fully commented `sulayi.yaml`, or start from
 ### Identities
 
 Test accounts let Sulayi compare what an anonymous caller gets with what a legitimate user
-gets — the only way a finding reaches *confirmed*.
+gets — the only way a finding reaches *confirmed*. Sulayi signs in through your app's own
+login and uses the session it issues:
 
 ```yaml
 identities:
   - id: alice
+    role: member                       # reported only; grants nothing
     authentication:
-      type: bearer                     # or apiKey, with a header
-      credential:
-        env: SULAYI_ALICE_TOKEN        # or: file: /run/secrets/alice-token
+      type: login
+      login:
+        path: /api/auth/login          # a path on the target, never a URL
+        body:
+          identifier: { env: ALICE_EMAIL }
+          password: { env: ALICE_PASSWORD }
+        session:
+          bearer: /accessToken         # JSON pointer to the token; or: cookies: true
     liveness:                          # strongly recommended
       method: GET
-      path: /api/me
-      expectStatus: [200]
-  - id: bob
-    authentication:
-      type: bearer
-      credential:
-        env: SULAYI_BOB_TOKEN
+      path: /api/users/me
 ```
+
+Keep the credentials in a git-ignored file and pass it with `--env`:
 
 ```bash
-SULAYI_ALICE_TOKEN='…' SULAYI_BOB_TOKEN='…' sulayi attack http://localhost:3000
+# .env.sulayi.local  (git-ignored)
+ALICE_EMAIL=alice@example.test
+ALICE_PASSWORD=…
+
+sulayi attack http://localhost:3000 --env .env.sulayi.local
 ```
 
-**A credential never goes in `sulayi.yaml`** — the file only accepts a reference to an
-environment variable or a file, so it is safe to commit. There is no `--token` flag,
-because process listings and shell history outlive the run. The `liveness` probe lets a
-run notice a token expiring mid-assessment instead of reporting the resulting denials as a
-clean result. Use dedicated, minimally privileged test accounts.
+- **A credential never goes in `sulayi.yaml`** — it only accepts references, so it is safe
+  to commit. There is no `--token` flag: process listings and shell history outlive the run.
+- **The credentials file lends only what is used.** Only names `sulayi.yaml` references
+  are read; values never enter the process environment; a file git tracks is refused.
+  Passing your app's own `.env` is safe in that sense, though a dedicated file is clearer.
+- **The login is the one request every profile sends**, exactly as configured and nothing
+  else.
+- **Expired sessions are recovered.** When the `liveness` canary answers 401 or 419, the
+  identity signs in again — at most three times a run, and the request that failed is
+  never replayed. Results from the dead interval are withdrawn, not trusted.
+- For a cookie session, `csrf: { cookie: XSRF-TOKEN, header: X-XSRF-TOKEN }` sends the
+  CSRF cookie back in a header, and a `preflight` GET can fetch it first.
+- A static token works too: `type: bearer` (or `apiKey` with a `header`) and
+  `credential: { env: NAME }` or `{ file: path }`.
+
+Use dedicated, minimally privileged test accounts.
 
 ### Owned resources
 
@@ -324,14 +344,14 @@ Sulayi is pre-1.0 and has no published release. Output schemas may change.
   real-binary integration tests for the engines. Precision and recall on real applications have **not** been
   measured, so no detection-quality claim is made.
 - **Platforms:** CI builds and tests on Linux, macOS and Windows.
-- **Next:** authentication flows and multiple roles, then testing applications without an
-  OpenAPI document, then injection and misconfiguration checks, each with runtime
+- **Next:** testing applications without an OpenAPI document, then authorization testing
+  across roles, then injection and misconfiguration checks, each with runtime
   verification. Optional AI assistance comes later and will never be required.
 
 Known limits today: BOLA testing needs you to name one record per owner; there is no
-tenancy or function-level authorization testing yet; authentication is bearer or header
-API key only; and an application whose `GET` endpoints change state is protected only as
-far as you list them.
+tenancy or function-level authorization testing yet; OAuth authorization flows, OIDC, MFA
+and browser login are not supported; and an application whose `GET` endpoints change
+state is protected only as far as you list them.
 
 ---
 

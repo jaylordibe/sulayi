@@ -365,6 +365,15 @@ The framework sends requests that change data, and its default profile does.
   (`config.TestAggressiveProfileRequiresDisposableTarget`,
   `cli.TestAggressiveProfileIsRefusedUnlessFullyAuthorized`,
   `cli.TestAggressiveProfileRunsOnceConfirmed`).
+- **The one exception: an identity's configured login.** It is permitted under
+  every profile, including `safe`, and only as the exact method and URL in the
+  configuration, carrying only the configured body fields, and only when sent
+  through the HTTP client's dedicated authentication path — whose marker is
+  unexported, so no check can claim it. The identical POST sent the way checks
+  send requests is refused. Scope, origin binding, the budget, pacing and the
+  request log all still apply. **TESTED** (`httpx.TestConfiguredLoginIsPermittedUnderSafe`,
+  `httpx.TestAuthenticationExceptionIsNotABypass`,
+  `httpx.TestAuthenticationRequestsStillPassEveryOtherGate`).
 - Pre-Sulayi profile names and `authorizeIntrusive` are refused with a migration
   message, never translated. **TESTED** (`config.TestLegacyProfileNamesAreRefused`,
   `config.TestLegacyAuthorizeIntrusiveIsRefused`).
@@ -1174,6 +1183,72 @@ stopping it must not be how data gets left modified.
   needs cleaning up, so refusals and pre-send cancellations carry a type of their
   own rather than a message. **TESTED** (`httpx.TestCancelledPacingWaitIsNotSent`,
   `httpx.TestNotSentIsFalseForTransportFailures`).
+
+### T-23 Signing in as test accounts (S1)
+
+Sulayi now holds passwords, signs in, and keeps sessions alive. Each step is a
+place a credential can leak, an account can be locked, or a dead session can
+pass for a protected application. See
+[ADR-0020](../adr/0020-login-identities-and-credentials-files.md).
+
+- **The credentials file lends nothing it does not use.** `--env` reads only the
+  names `sulayi.yaml` references and ignores the rest, so an application's real
+  `.env` passed by mistake contributes none of its database passwords or signing
+  keys. Values are held in memory and never placed in the process environment, so
+  no child process can inherit one. Nothing is loaded unless `--env` names it.
+  **TESTED** (`identity.TestOnlyReferencedNamesAreLoaded`,
+  `identity.TestFileValuesNeverEnterTheProcessEnvironment`).
+- **A committed credentials file is refused.** A file git tracks stops the run
+  before any request or run directory exists; one no ignore rule covers, or one
+  readable by other users, is warned about. **TESTED**
+  (`identity.TestTrackedCredentialsFileIsRefused`, `cli.TestTrackedEnvFileStopsTheRun`,
+  `identity.TestUnignoredCredentialsFileIsWarnedAbout`,
+  `identity.TestLooselyPermissionedCredentialsFileIsWarnedAbout`).
+- **Errors never print a value.** A malformed file is reported by line number; a
+  failed login names the request and its status, never the credentials or the
+  response. **TESTED** (`identity.TestParseErrorsNeverEchoContent`,
+  `identity.TestRejectedLoginBlocksTheIdentityWithoutEchoingCredentials`).
+- **A login reaches only the target.** Its path is a path, never a URL; a GET login
+  is refused because credentials do not belong in a URL; the preflight may only be
+  GET or HEAD. **TESTED** (`identity.TestLoginValidation`).
+- **The token is read without being stored.** Redaction masks JWTs in every
+  captured body, so the login response comes back raw, in memory only, through a
+  path that returns no exchange to store. Every credential field, preflight value,
+  token and cookie is registered with the redactor before the next capture, and
+  the end-to-end test fails if registration is removed. **TESTED**
+  (`identity.TestBearerLoginSignsInAndRedactsTheToken`,
+  `cli.TestLoginThroughEnvFileLeavesNoSecretAnywhere`, which reflects the password,
+  token and cookie from the target and searches the terminal and every file under
+  `.sulayi/`).
+- **A session is a session, not a status.** A login succeeds when it issues one: a
+  bearer token from a 2xx body, or cookies the login response itself sets, on a 2xx
+  or an unfollowed redirect. Bad credentials answered with 400 leave the identity
+  unusable, and its work blocked. **TESTED**
+  (`identity.TestLoginWithoutTheTokenAtThePointerFails`,
+  `identity.TestBearerLoginAnsweredWithRedirectFails`,
+  `identity.TestCookieSessionWithCSRF`, `identity.TestPreflightValueAndRedirectedLogin`).
+- **Recovery is bounded and never replays.** An identity signs in again only when
+  its canary answers 401 or 419 — a 403 is an authorization result and changes
+  nothing — at most three times a run, one sign-in at a time. The request that
+  failed is not resent, so a write cannot be duplicated. **TESTED**
+  (`identity.TestExpiredSessionIsRecoveredWithoutReplay`,
+  `identity.TestForbiddenCanaryDoesNotSignInAgain`,
+  `identity.TestReauthenticationIsBounded`, `identity.TestConcurrentSuspicionSignsInOnce`).
+- **A dead session cannot produce a clean result.** Every interval in which a
+  session may have been dead is kept, including after recovery, and results whose
+  authenticated control ran inside one are withdrawn. **TESTED**
+  (`engine.TestInvalidationAfterRecoveryCoversOnlyTheDeadInterval`).
+
+**Limits.** Cookie sessions and CSRF handling are tested against local fixtures
+modelled on documented flows, not against Laravel Sanctum, NextAuth or any other
+framework's real implementation. Bearer logins are validated against the Laravel
+Passport and NestJS JWT reference starters by the reference-applications
+workflow. OAuth authorization flows, OIDC, MFA and browser login are not
+supported. Login and sign-out routes in the specification are excluded from
+the sweep by default: a login so accounts are not locked, a sign-out so an
+authenticated control request cannot end the session the run depends on.
+**TESTED** (`engine.TestSignOutRoutesAreExcludedByDefault`). A sign-out route
+whose path does not look like one belongs in `assessment.excludeOperations`.
 
 ## 3. Residual risk accepted at this stage
 

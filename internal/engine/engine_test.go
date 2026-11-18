@@ -362,3 +362,27 @@ func TestCancelledJobsStillAppearInTheLedger(t *testing.T) {
 		t.Error("no row attributes its absence to cancellation")
 	}
 }
+
+// A sign-out route is excluded too: the authenticated control request a check
+// sends would end the session every later result depends on.
+func TestSignOutRoutesAreExcludedByDefault(t *testing.T) {
+	ops := []model.Operation{
+		op("GET", "/api/logout"), op("GET", "/api/auth/sign-out"), op("GET", "/signout"), op("GET", "/api/profile"),
+	}
+	stub := &stubCheck{id: "stub", applies: true, result: check.Result{Disposition: model.DispositionExecuted}}
+	opts := baseOptions(ops, []Check{stub})
+	opts.ExcludeAuthEndpoints = true
+	res, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, id := range []string{"GET /api/logout", "GET /api/auth/sign-out", "GET /signout"} {
+		e, _ := entryFor(res, id)
+		if e.Disposition != model.DispositionUntested || !strings.Contains(e.Detail, "end the session") {
+			t.Errorf("%s = %s (%q), want untested because it would end the session", id, e.Disposition, e.Detail)
+		}
+	}
+	if stub.ran.Load() != 1 {
+		t.Errorf("checks run = %d, want only the non-auth operation", stub.ran.Load())
+	}
+}

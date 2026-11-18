@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -179,6 +180,8 @@ type Identity struct {
 	ID string `yaml:"id"`
 	// Label is a human-readable description.
 	Label string `yaml:"label"`
+	// Role labels what the identity is in the application. Reported only.
+	Role string `yaml:"role"`
 	// Authentication says how to authenticate as this identity.
 	Authentication Authentication `yaml:"authentication"`
 	// Liveness configures a canary that establishes whether the identity is
@@ -190,7 +193,7 @@ type Identity struct {
 // Authentication is a supported authentication mechanism and its credential
 // reference.
 type Authentication struct {
-	// Type is bearer or apiKey.
+	// Type is bearer, apiKey or login.
 	Type string `yaml:"type"`
 	// Header is the field name for the apiKey type.
 	Header string `yaml:"header"`
@@ -198,6 +201,52 @@ type Authentication struct {
 	ValuePrefix string `yaml:"valuePrefix"`
 	// Credential references where the secret is read from.
 	Credential Credential `yaml:"credential"`
+	// Login is the sign-in flow for the login type.
+	Login *LoginFlow `yaml:"login"`
+}
+
+// LoginFlow signs in through the application's own login request.
+type LoginFlow struct {
+	// Method defaults to POST.
+	Method string `yaml:"method"`
+	// Path is a path on the target, never a URL.
+	Path string `yaml:"path"`
+	// Form sends a URL-encoded form instead of JSON.
+	Form bool `yaml:"form"`
+	// Body maps each field to where its value comes from.
+	Body map[string]LoginField `yaml:"body"`
+	// Preflight is an optional read-only request sent first.
+	Preflight *LoginPreflight `yaml:"preflight"`
+	// Session says what the login issues.
+	Session LoginSession `yaml:"session"`
+	// CSRF copies a cookie into a header for a cookie session.
+	CSRF *LoginCSRF `yaml:"csrf"`
+}
+
+// LoginField is one login body field: a reference, never a value.
+type LoginField struct {
+	Env           string `yaml:"env"`
+	File          string `yaml:"file"`
+	FromPreflight string `yaml:"fromPreflight"`
+}
+
+// LoginPreflight is a GET or HEAD sent before the login.
+type LoginPreflight struct {
+	Method string `yaml:"method"`
+	Path   string `yaml:"path"`
+}
+
+// LoginSession is either a bearer token read from the response by JSON
+// pointer, or the cookies the response sets.
+type LoginSession struct {
+	Bearer  string `yaml:"bearer"`
+	Cookies bool   `yaml:"cookies"`
+}
+
+// LoginCSRF names the cookie whose value is sent in a header.
+type LoginCSRF struct {
+	Cookie string `yaml:"cookie"`
+	Header string `yaml:"header"`
 }
 
 // Credential references a secret without containing one.
@@ -664,6 +713,7 @@ func (c Config) IdentityModels() []identity.Identity {
 		id := identity.Identity{
 			ID:    i.ID,
 			Label: i.Label,
+			Role:  i.Role,
 			Auth: identity.Authentication{
 				Scheme:      identity.Scheme(i.Authentication.Type),
 				Header:      i.Authentication.Header,
@@ -672,6 +722,7 @@ func (c Config) IdentityModels() []identity.Identity {
 					Env:  i.Authentication.Credential.Env,
 					File: i.Authentication.Credential.File,
 				},
+				Login: loginModel(i.Authentication.Login),
 			},
 		}
 		if i.Liveness != nil {
@@ -851,12 +902,44 @@ func (c Config) AdapterSpecs() []adapter.Spec {
 // identity credentials, so they can be kept out of every adapter.
 func (c Config) CredentialEnvNames() []string {
 	var out []string
-	for _, i := range c.Identities {
-		if e := i.Authentication.Credential.Env; e != "" {
-			out = append(out, e)
-		}
+	for _, i := range c.IdentityModels() {
+		out = append(out, i.CredentialEnvNames()...)
 	}
 	return out
+}
+
+// loginModel maps a configured login flow onto the identity package's types.
+// Body fields are ordered by name so the request is the same on every run.
+func loginModel(l *LoginFlow) *identity.Login {
+	if l == nil {
+		return nil
+	}
+	m := &identity.Login{
+		Method:  l.Method,
+		Path:    l.Path,
+		Form:    l.Form,
+		Session: identity.Session{Bearer: l.Session.Bearer, Cookies: l.Session.Cookies},
+	}
+	names := make([]string, 0, len(l.Body))
+	for n := range l.Body {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		f := l.Body[n]
+		m.Fields = append(m.Fields, identity.LoginField{
+			Name:          n,
+			Source:        identity.CredentialSource{Env: f.Env, File: f.File},
+			FromPreflight: f.FromPreflight,
+		})
+	}
+	if l.Preflight != nil {
+		m.Preflight = &identity.Preflight{Method: l.Preflight.Method, Path: l.Preflight.Path}
+	}
+	if l.CSRF != nil {
+		m.CSRF = &identity.CSRF{Cookie: l.CSRF.Cookie, Header: l.CSRF.Header}
+	}
+	return m
 }
 
 // ResourceFixtures maps the configured resources onto the resource package's

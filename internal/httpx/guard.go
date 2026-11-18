@@ -51,6 +51,9 @@ type Guard struct {
 	sealed bool
 	grants map[string]map[string]struct{} // "METHOD canonical-url" -> permitted body fields
 	rules  []stateChangingRule
+	// auth are the exact authentication requests permitted in every profile:
+	// an identity's configured login and preflight, and nothing else.
+	auth map[string]map[string]struct{}
 }
 
 type stateChangingRule struct {
@@ -67,7 +70,7 @@ func NewGuard(profile model.Profile, stateChanging []string) (*Guard, error) {
 	if !profile.Valid() {
 		return nil, fmt.Errorf("httpx: invalid profile %q", profile)
 	}
-	g := &Guard{profile: profile, grants: map[string]map[string]struct{}{}}
+	g := &Guard{profile: profile, grants: map[string]map[string]struct{}{}, auth: map[string]map[string]struct{}{}}
 	for _, id := range stateChanging {
 		if err := g.AddStateChangingTemplate(id); err != nil {
 			return nil, err
@@ -131,6 +134,41 @@ func (g *Guard) Grant(method, rawURL string, fields []string) error {
 	return nil
 }
 
+// AllowAuthentication registers one identity's configured authentication
+// request — its login, or a preflight that fetches a CSRF token — as permitted
+// under every profile, including safe.
+//
+// It is the one exception to "safe sends nothing state-changing", and it is
+// narrow on purpose: the exact method and URL, a body carrying only the fields
+// the configuration names, and only for a request sent through Authenticate,
+// which no check can reach. A check posting the identical request through Do is
+// still refused. Scope, origin binding, the budget, pacing and the request log
+// all apply as usual.
+func (g *Guard) AllowAuthentication(method, rawURL string, fields []string) error {
+	method = strings.ToUpper(strings.TrimSpace(method))
+	if method == "DELETE" {
+		return errors.New("httpx: an authentication request may not be a DELETE")
+	}
+	key, err := grantKey(method, rawURL)
+	if err != nil {
+		return err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.sealed {
+		return errors.New("httpx: the safety guard is sealed")
+	}
+	set := g.auth[key]
+	if set == nil {
+		set = map[string]struct{}{}
+		g.auth[key] = set
+	}
+	for _, f := range fields {
+		set[f] = struct{}{}
+	}
+	return nil
+}
+
 // Seal stops further grants and rules from being added.
 func (g *Guard) Seal() {
 	g.mu.Lock()
@@ -161,7 +199,8 @@ func (g *Guard) StateChanging(method, rawURL string) bool {
 
 // check decides whether a request may be sent. A nil guard behaves as the
 // safe profile with no grants, so a client built without one fails closed.
-func (g *Guard) check(method, rawURL string, body []byte) error {
+// authentication is true only for a request sent through Authenticate.
+func (g *Guard) check(method, rawURL string, body []byte, authentication bool) error {
 	method = strings.ToUpper(strings.TrimSpace(method))
 	refuse := func(reason string) error {
 		return &ErrRefused{Method: method, Target: rawURL, Reason: reason}
@@ -177,6 +216,20 @@ func (g *Guard) check(method, rawURL string, body []byte) error {
 	}
 	if !stateChanging {
 		return nil
+	}
+
+	if authentication && g != nil {
+		if key, err := grantKey(method, rawURL); err == nil {
+			g.mu.Lock()
+			fields, ok := g.auth[key]
+			g.mu.Unlock()
+			if ok {
+				if err := authBodyWithin(body, fields); err != nil {
+					return refuse(err.Error())
+				}
+				return nil
+			}
+		}
 	}
 
 	switch profile {
@@ -262,6 +315,35 @@ func bodyWithin(body []byte, permitted map[string]struct{}) error {
 	if len(extra) > 0 {
 		sort.Strings(extra)
 		return fmt.Errorf("the body changes field(s) %s that the fixture was not registered to change",
+			strings.Join(extra, ", "))
+	}
+	return nil
+}
+
+// authBodyWithin requires an authentication body to carry only the configured
+// fields, as a JSON object or as a URL-encoded form.
+func authBodyWithin(body []byte, permitted map[string]struct{}) error {
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return nil
+	}
+	if err := bodyWithin(body, permitted); err == nil {
+		return nil
+	} else if json.Valid(body) {
+		return err
+	}
+	form, err := url.ParseQuery(string(body))
+	if err != nil {
+		return errors.New("the authentication body is neither a JSON object nor a form, so its fields cannot be verified")
+	}
+	var extra []string
+	for k := range form {
+		if _, ok := permitted[k]; !ok {
+			extra = append(extra, k)
+		}
+	}
+	if len(extra) > 0 {
+		sort.Strings(extra)
+		return fmt.Errorf("the authentication body carries field(s) %s that are not configured",
 			strings.Join(extra, ", "))
 	}
 	return nil

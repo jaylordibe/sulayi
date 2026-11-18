@@ -49,6 +49,7 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 		outputDir  string
 		noProbe    bool
 		yes        bool
+		envFile    string
 	)
 
 	cmd := &cobra.Command{
@@ -90,7 +91,20 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 					return err
 				}
 			}
-			return runScan(cmd.Context(), cfg, stdout, stderr)
+			// The credentials file is read before anything else happens, so a
+			// file that must not be used stops the run before a request is sent
+			// or a run directory exists.
+			var creds *identity.EnvFile
+			if envFile != "" {
+				creds, err = identity.LoadEnvFile(envFile, cfg.CredentialEnvNames())
+				if err != nil {
+					return fail(ExitUsage, "%v", err)
+				}
+				for _, w := range creds.Warnings {
+					fmt.Fprintf(stderr, "sulayi: warning: %s\n", w)
+				}
+			}
+			return runScan(cmd.Context(), cfg, creds, stdout, stderr)
 		},
 	}
 
@@ -100,6 +114,8 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&profile, "profile", "", "safety profile: safe, standard (default), aggressive")
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "run output directory (default: .sulayi)")
 	cmd.Flags().BoolVar(&noProbe, "no-probe", false, "do not probe well-known specification paths")
+	cmd.Flags().StringVar(&envFile, "env", "", "credentials file of NAME=value lines; only the names "+
+		"sulayi.yaml references are read, and none is exported to child processes")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the aggressive-profile confirmation prompt; "+
 		"needed when there is no terminal. It changes nothing else")
 	return cmd
@@ -182,7 +198,7 @@ func isLoopbackTarget(raw string) bool {
 	return addr.IsLoopback()
 }
 
-func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) error {
+func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, stdout, stderr io.Writer) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -335,12 +351,32 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 		}
 	}
 
-	// Identities are resolved before any request is possible, so that every
-	// credential is registered with the redactor before the first exchange can
-	// be captured. Resolution never fails the run: an identity whose credential
-	// is missing becomes a blocked ledger row, which is strictly more useful
-	// than an error, and far more useful than proceeding anonymously in silence.
-	identities := identity.Resolve(cfg.IdentityModels(), cfg.Target.BaseURL, client, red)
+	// Identities are resolved before any authenticated request is possible, so
+	// that every credential is registered with the redactor before an exchange
+	// that could carry it is captured. Resolution never fails the run: an
+	// identity whose credential is missing becomes a blocked ledger row, which
+	// is strictly more useful than an error, and far more useful than
+	// proceeding anonymously in silence.
+	lookup := identity.ProcessEnv
+	if creds != nil {
+		lookup = creds.Lookup
+		fmt.Fprintf(stderr, "sulayi: credentials file %s: %d referenced name(s) read, %d other entr(ies) "+
+			"ignored\n", creds.Path(), len(cfg.CredentialEnvNames())-missingIn(creds, cfg.CredentialEnvNames()),
+			creds.Ignored)
+	}
+	models := cfg.IdentityModels()
+	// Each login request is registered with the safety guard before it is sent:
+	// it is the one state-changing request every profile permits, and only
+	// exactly as configured.
+	for _, m := range models {
+		if method, u, fields, ok := m.LoginRequest(cfg.Target.BaseURL); ok {
+			if err := guard.AllowAuthentication(method, u, fields); err != nil {
+				return fail(ExitInternal, "%v", err)
+			}
+		}
+	}
+	identities := identity.ResolveWith(models, cfg.Target.BaseURL, client, red, lookup)
+	identities.SignIn(ctx)
 	for _, st := range identities.Statuses() {
 		if !st.Usable {
 			fmt.Fprintf(stderr, "sulayi: identity %s: credential unavailable from %s (%s); "+
@@ -661,4 +697,16 @@ func confirmAggressive(cfg config.Config, yes bool, stderr io.Writer) error {
 		return fail(ExitUsage, "confirmation did not match %s; nothing was sent", want)
 	}
 	return nil
+}
+
+// missingIn counts the referenced names the credentials file does not define.
+// It reports counts only; which names a file holds is not printed.
+func missingIn(creds *identity.EnvFile, names []string) int {
+	var n int
+	for _, name := range names {
+		if !creds.Has(name) {
+			n++
+		}
+	}
+	return n
 }

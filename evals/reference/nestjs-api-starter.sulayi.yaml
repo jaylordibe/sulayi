@@ -1,0 +1,38 @@
+# Signs in to nestjs-api-starter as its seeded admin and user, using the
+# starter's own .env (SEED_*) as the credentials file:
+#
+#   sulayi attack -c evals/reference/nestjs-api-starter.sulayi.yaml \
+#     --env <starter>/.env --spec-url http://127.0.0.1:3000/api/docs/json
+#
+# Only the four names below are read from that file; everything else in it is
+# ignored. The reference-applications workflow runs exactly this.
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://127.0.0.1:3000
+discovery:
+  probeWellKnownPaths: false
+identities:
+  - id: admin
+    role: admin
+    authentication:
+      type: login
+      login:
+        path: /api/auth/login
+        body:
+          identifier: { env: SEED_ADMIN_EMAIL }
+          password: { env: SEED_ADMIN_PASSWORD }
+        session:
+          bearer: /accessToken
+    liveness: { method: GET, path: /api/users/me }
+  - id: user
+    role: user
+    authentication:
+      type: login
+      login:
+        path: /api/auth/login
+        body:
+          identifier: { env: SEED_USER_EMAIL }
+          password: { env: SEED_USER_PASSWORD }
+        session:
+          bearer: /accessToken
+    liveness: { method: GET, path: /api/users/me }
