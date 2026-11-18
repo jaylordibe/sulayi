@@ -1267,6 +1267,10 @@ func TestAdapterAloneIsASurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(t.TempDir(), "sulayi-adapter-laravel")
+	if runtime.GOOS == "windows" {
+		// Windows runs only files with an executable extension.
+		bin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", bin, "./adapters/laravel")
 	build.Dir = filepath.Join("..", "..")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -1305,7 +1309,7 @@ func TestAdapterAloneIsASurface(t *testing.T) {
 	}
 	surface, _ := doc["surface"].(map[string]any)
 	if surface["specDerived"] != false || surface["operationCount"].(float64) == 0 {
-		t.Fatalf("surface = %v", surface)
+		t.Fatalf("surface = %v\nstderr: %s", surface, errOut)
 	}
 	fs := findingsFor(doc, "GET /api/orders")
 	if len(fs) != 1 || fs[0]["state"] != "suspected" {
