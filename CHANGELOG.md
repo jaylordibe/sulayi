@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 schemas may change between minor versions. Each schema carries its own version string so a
 consumer can detect a change rather than misparse.
 
+## [Unreleased]
+
+### Changed
+
+- **Renamed to Sulayi** ([ADR-0018](docs/adr/0018-product-identity-sulayi.md)). The module is
+  `github.com/jaylordibe/sulayi`, the CLI is `sulayi`, the assessment command is
+  `sulayi attack` (was `appsec scan`; no alias), the configuration is `sulayi.yaml` with
+  `apiVersion: sulayi/v1alpha1`, the run directory is `.sulayi/`, and the report, run,
+  evidence and adapter schema identifiers use the `sulayi` namespace. An `appsec.yaml` or
+  `apiVersion: appsec/v1alpha1` is refused with a migration message rather than ignored.
+- **ZAP is gated at the `intrusive` profile in every mode.** Passive mode relied on
+  `-quickprogress`, which ZAP documents only as a progress display, so its passivity is
+  unproven and it no longer runs at the default profile.
+
+### Added
+
+- The runs directory writes its own `.gitignore`, so evidence is not committed from a
+  repository whose ignore rules predate the rename.
+
 ## [0.1.0] — unreleased
 
 First public release. Everything below is in it: there is no earlier published version, so

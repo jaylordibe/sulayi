@@ -1,4 +1,4 @@
-module github.com/jaylordibe/application-security-framework
+module github.com/jaylordibe/sulayi
 
 go 1.27.1
 

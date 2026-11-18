@@ -39,7 +39,7 @@ authenticated baseline to compare an anonymous response against.
 
 | Task | Acceptance criteria | Delivered |
 |---|---|---|
-| Identity model and credential loading | Credentials come from environment variables or a secrets file, never from `appsec.yaml` in plaintext. Registered with the redactor before first use. | ✅ `internal/identity`. An identity holds a *reference*; the configuration schema has no field that accepts a value, and the absence is asserted by test. Both `env` and `file` sources. |
+| Identity model and credential loading | Credentials come from environment variables or a secrets file, never from `sulayi.yaml` in plaintext. Registered with the redactor before first use. | ✅ `internal/identity`. An identity holds a *reference*; the configuration schema has no field that accepts a value, and the absence is asserted by test. Both `env` and `file` sources. |
 | Bearer and API-key providers | A configured identity can issue an authenticated request; failure to authenticate is `blocked{authentication_failed}`, never a silent anonymous run. | ✅ Bearer and header API-key. Header names are validated as RFC 9110 field names and framing headers are refused. Query-string API keys deferred deliberately (ADR-0012, T-16). |
 | Authenticated control request in the check | A finding reaches `confirmed` only when the anonymous and authenticated responses are materially equivalent; otherwise it stays `suspected` and says why. | ✅ Material equivalence is a conjunction of outcome, status, content type, JSON document shape and cache state ([ADR-0012](adr/0012-authenticated-control-and-material-equivalence.md)). |
 | Identity liveness canary | A known-authenticated operation is probed periodically. On credential expiry, every result since the last good canary is invalidated and marked blocked — otherwise a token expiring mid-run produces a sweep of false "denied" results that reads as a clean report. | ✅ with two deliberate refinements, below. |
@@ -137,7 +137,7 @@ information.
 
 | Task | Acceptance criteria | Delivered |
 |---|---|---|
-| Adapter JSON contract + schema | Versioned, documented, and validated before it can influence a plan. | ✅ `appsec.adapter/v1alpha1`, `schemas/appsec.adapter.schema.json`, [an author guide](adapters/contract.md), and a conformance suite whose every case states why acceptance would be unsafe. |
+| Adapter JSON contract + schema | Versioned, documented, and validated before it can influence a plan. | ✅ `sulayi.adapter/v1alpha1`, `schemas/sulayi.adapter.schema.json`, [an author guide](adapters/contract.md), and a conformance suite whose every case states why acceptance would be unsafe. |
 | Golden conformance suite | An adapter author can validate against fixtures without reading the Go core. | ✅ `internal/adapter/validate_test.go`, plus a schema/parser agreement test so the two cannot drift. |
 | Laravel adapter | Reads routes, middleware, gates and policies via `artisan`. | ⚠️ **Static tier only.** Routes and middleware groups are read from source; gates are detected as controls in controller actions. `artisan` is **not** used — see below. |
 | NestJS adapter | Reads the permission catalog and guard metadata via a TypeScript probe. | ⚠️ **Static tier only.** Controllers, the global guard, `@Public()` and authorization decorators are read from source. No module is imported — see below. |
@@ -200,7 +200,7 @@ deliberately does not reinvent mature scanners.
 | Task | Acceptance criteria | Delivered |
 |---|---|---|
 | Engine process supervision | Process groups so a killed engine does not orphan a JVM or a browser; `WaitDelay` so a hung child cannot block; both pipes drained concurrently; byte and time budgets; a minimal explicit environment so target credentials never leak into a third-party process. | ✅ One supervisor in `internal/proc`, shared with the M3 adapter boundary so there is a single implementation. Proven with a fake engine that hangs, forks a surviving grandchild, floods, and holds a pipe open. |
-| Normalisation | Engine output enters as `observed`, never as `confirmed`. Source severity and confidence scales are preserved verbatim rather than converted. | ✅ `ToFinding` takes no state parameter; AppSec severity is `unassessed`, which has no rank and cannot satisfy a policy threshold. |
+| Normalisation | Engine output enters as `observed`, never as `confirmed`. Source severity and confidence scales are preserved verbatim rather than converted. | ✅ `ToFinding` takes no state parameter; Sulayi severity is `unassessed`, which has no rank and cannot satisfy a policy threshold. |
 | Failure isolation | A crashed engine is a `blocked` row plus a recorded tool failure. It is never an absence of findings. | ✅ Missing, crashed, hung, flooding, malformed and profile-refused engines all produce a blocked row whose text says what was lost. A failed engine cannot remove a class from `classesNotAssessed`. |
 | Nuclei hardening | `-disable-unsigned-templates`, never `-code`, pinned and checksummed templates, local network access restricted, Interactsh self-hosted or disabled. | ✅ with the flags verified against Nuclei v3.11.x rather than assumed, and with a corpus that would execute nothing refused before the process starts — see below. |
 
@@ -220,7 +220,7 @@ to be which unsafe behaviours are already off:
 "Pinned and checksummed templates" became something achievable: Nuclei refuses to
 run without an operator-supplied template directory, and the corpus is recorded —
 by commit where it is a git checkout, and explicitly as *unpinned* where it is
-not. AppSec Framework does not bundle, download or checksum somebody else's
+not. Sulayi does not bundle, download or checksum somebody else's
 template corpus.
 
 `-disable-unsigned-templates` then turned out to need a second decision. Templates
@@ -264,7 +264,7 @@ its own admissions is not a roadmap.
 
 **No engine was executed against a real binary.** None of Nuclei, ZAP or
 Semgrep/opengrep is installed in the environment this was built in, and
-installing one would have meant AppSec Framework's own development doing exactly
+installing one would have meant Sulayi's own development doing exactly
 what §33 forbids the tool from doing.
 
 What that means concretely:
@@ -395,7 +395,7 @@ that were all wrong.
 
 | Task | Acceptance criteria | Delivered |
 |---|---|---|
-| Reference applications in CI | Both reference applications brought up and assessed as part of the evaluation harness, not read as source. | ✅ `evals/reference_test.go` asserts six invariants against a running application and skips without `APPSEC_REFERENCE_TARGET`, so a contributor pays nothing. `.github/workflows/reference-apps.yml` boots both applications weekly and on demand. Verified live against both: `laravel-api` 38 operations / 11 executed, `nestjs-api` 84 / 10. |
+| Reference applications in CI | Both reference applications brought up and assessed as part of the evaluation harness, not read as source. | ✅ `evals/reference_test.go` asserts six invariants against a running application and skips without `SULAYI_REFERENCE_TARGET`, so a contributor pays nothing. `.github/workflows/reference-apps.yml` boots both applications weekly and on demand. Verified live against both: `laravel-api` 38 operations / 11 executed, `nestjs-api` 84 / 10. |
 | Path identity | The distinction covered wherever operation identity is compared. | ✅ `Operation.MatchesID` accepts both spellings and is used at all three operator-facing sites. It closed a **fail-open**: `assessment.excludeOperations` silently did not match against any specification with a server base path, so an operation the operator forbade was exercised. |
 | Fixture applicability | Corpus cases pairing an ownership fixture with collection, health and enumeration endpoints. | ✅ `Fixture.Addresses` plus a test built from the exact operations that produced the fourteen false positives. |
 | Terminal output | Every assurance-relevant fact asserted against the terminal as well as the JSON. | ✅ Rejected identities, unusable identities and failed components now appear in the summary, each with a test. The reference harness asserts the terminal counters agree with the ledger. |
@@ -441,7 +441,7 @@ the coverage ledger the product and demoted authorization to a contributor.
 **Nearer, because they deepen the ledger:**
 
 - **Fixture and environment orchestration.** The measured burden today is 33 configuration
-  lines and six manual steps AppSec cannot perform — including editing the database
+  lines and six manual steps Sulayi cannot perform — including editing the database
   directly — ending in a hand-copied UUID that goes stale on the next reset. Hadrian
   creates fixtures dynamically. This is the largest proven obstacle to using the
   authorization checks at all.

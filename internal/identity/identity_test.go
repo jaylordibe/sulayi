@@ -12,7 +12,7 @@ import (
 // The whole point of the Secret type is that there is no accidental route from
 // a credential to output. Each of these is a route Go offers by default.
 func TestSecretNeverRendersItsValue(t *testing.T) {
-	const value = "APPSEC_M1_SECRET_MUST_NEVER_PERSIST_7f91"
+	const value = "SULAYI_M1_SECRET_MUST_NEVER_PERSIST_7f91"
 	s := NewSecret(value)
 
 	type carrier struct {
@@ -82,8 +82,8 @@ func TestCredentialSourceResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("APPSEC_TEST_TOKEN", "env-credential")
-	t.Setenv("APPSEC_TEST_BLANK", "   ")
+	t.Setenv("SULAYI_TEST_TOKEN", "env-credential")
+	t.Setenv("SULAYI_TEST_BLANK", "   ")
 
 	tests := []struct {
 		name    string
@@ -91,9 +91,9 @@ func TestCredentialSourceResolve(t *testing.T) {
 		want    string
 		wantErr string
 	}{
-		{name: "env", src: CredentialSource{Env: "APPSEC_TEST_TOKEN"}, want: "env-credential"},
-		{name: "env missing", src: CredentialSource{Env: "APPSEC_TEST_ABSENT"}, wantErr: "is not set"},
-		{name: "env blank", src: CredentialSource{Env: "APPSEC_TEST_BLANK"}, wantErr: "set but empty"},
+		{name: "env", src: CredentialSource{Env: "SULAYI_TEST_TOKEN"}, want: "env-credential"},
+		{name: "env missing", src: CredentialSource{Env: "SULAYI_TEST_ABSENT"}, wantErr: "is not set"},
+		{name: "env blank", src: CredentialSource{Env: "SULAYI_TEST_BLANK"}, wantErr: "set but empty"},
 		{name: "file trims whitespace", src: CredentialSource{File: good}, want: "file-credential"},
 		{name: "file missing", src: CredentialSource{File: filepath.Join(dir, "nope")}, wantErr: "cannot read credential file"},
 		{name: "file empty", src: CredentialSource{File: empty}, wantErr: "is empty"},
@@ -153,18 +153,18 @@ func TestIdentityValidation(t *testing.T) {
 		id      Identity
 		wantErr string
 	}{
-		{name: "valid bearer", id: bearer("admin", "APPSEC_ADMIN_TOKEN")},
+		{name: "valid bearer", id: bearer("admin", "SULAYI_ADMIN_TOKEN")},
 		{
 			name: "valid api key",
 			id: Identity{ID: "svc", Auth: Authentication{
 				Scheme: SchemeAPIKey, Header: "X-API-Key",
-				Credential: CredentialSource{Env: "APPSEC_SVC"},
+				Credential: CredentialSource{Env: "SULAYI_SVC"},
 			}},
 		},
-		{name: "missing id", id: bearer("", "APPSEC_X"), wantErr: "id is required"},
-		{name: "reserved id", id: bearer("anonymous", "APPSEC_X"), wantErr: "reserved"},
-		{name: "uppercase id", id: bearer("Admin", "APPSEC_X"), wantErr: "lowercase"},
-		{name: "id with slash", id: bearer("a/b", "APPSEC_X"), wantErr: "lowercase"},
+		{name: "missing id", id: bearer("", "SULAYI_X"), wantErr: "id is required"},
+		{name: "reserved id", id: bearer("anonymous", "SULAYI_X"), wantErr: "reserved"},
+		{name: "uppercase id", id: bearer("Admin", "SULAYI_X"), wantErr: "lowercase"},
+		{name: "id with slash", id: bearer("a/b", "SULAYI_X"), wantErr: "lowercase"},
 		{
 			name:    "unknown scheme",
 			id:      Identity{ID: "x", Auth: Authentication{Scheme: "oauth2", Credential: CredentialSource{Env: "E"}}},
@@ -296,8 +296,8 @@ func TestIdentityValidation(t *testing.T) {
 // the ledger ambiguous about which principal a result belongs to.
 func TestDuplicateIdentityIDsAreRejected(t *testing.T) {
 	problems := ValidateAll([]Identity{
-		bearer("admin", "APPSEC_A"),
-		bearer("admin", "APPSEC_B"),
+		bearer("admin", "SULAYI_A"),
+		bearer("admin", "SULAYI_B"),
 	})
 	joined := strings.Join(problems, "\n")
 	if !strings.Contains(joined, "duplicates") {
@@ -307,8 +307,8 @@ func TestDuplicateIdentityIDsAreRejected(t *testing.T) {
 
 func TestValidateAllAcceptsDistinctIdentities(t *testing.T) {
 	problems := ValidateAll([]Identity{
-		bearer("admin", "APPSEC_A"),
-		bearer("service", "APPSEC_B"),
+		bearer("admin", "SULAYI_A"),
+		bearer("service", "SULAYI_B"),
 	})
 	if len(problems) != 0 {
 		t.Fatalf("valid identities rejected: %v", problems)

@@ -1,11 +1,11 @@
-// Command appsec-adapter-laravel reports normalized security facts about a
+// Command sulayi-adapter-laravel reports normalized security facts about a
 // Laravel application.
 //
 // It reads source and never executes it. That is a deliberate and consequential
 // choice, because the higher-fidelity option is worse than it looks: `php
 // artisan route:list` requires vendor/autoload.php and then boots the whole
 // framework, registering and booting every service provider the repository
-// defines. On a repository AppSec did not write, that is arbitrary code
+// defines. On a repository Sulayi did not write, that is arbitrary code
 // execution wearing the costume of a read-only query. Worse, a fresh checkout
 // has no vendor/ at all, so using artisan first requires `composer install`,
 // whose post-autoload-dump hook in this project's own reference application
@@ -22,8 +22,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/adapters/internal/source"
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
+	"github.com/jaylordibe/sulayi/adapters/internal/source"
+	"github.com/jaylordibe/sulayi/internal/adapter"
 )
 
 // Laravel's security semantics, which exist here and nowhere in the core.

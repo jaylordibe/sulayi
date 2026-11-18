@@ -26,9 +26,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/proc"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/proc"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // binaryName is what is looked up on PATH when no explicit path is configured.
@@ -53,16 +53,16 @@ func (Engine) Meta() scanner.Meta {
 		},
 		Unlocks: "known CVEs, misconfigurations and technology fingerprints, from templates you supply",
 		InstallHint: "Install Nuclei from https://github.com/projectdiscovery/nuclei and point " +
-			"engines.nuclei.executable at it. AppSec Framework never downloads or installs an engine.",
+			"engines.nuclei.executable at it. Sulayi never downloads or installs an engine.",
 	}
 }
 
 // RequiredProfile is the safety profile a Nuclei run needs.
 //
 // Verification, not discovery. Nuclei sends real probe requests chosen by
-// templates AppSec did not write and cannot read, so it is not reconnaissance
+// templates Sulayi did not write and cannot read, so it is not reconnaissance
 // however benign a particular corpus happens to be. It is not gated at
-// intrusive either, which would be its own dishonesty: that would imply AppSec
+// intrusive either, which would be its own dishonesty: that would imply Sulayi
 // knows the templates are destructive, and it does not know what they are at
 // all.
 func (Engine) RequiredProfile(scanner.Settings) model.Profile { return model.ProfileVerification }
@@ -100,7 +100,7 @@ func (Engine) Detect(ctx context.Context, s scanner.Settings) scanner.Availabili
 		Path:    path,
 		Version: version,
 		Warnings: []string{
-			"the Nuclei executable is whatever is installed at " + path + "; AppSec Framework " +
+			"the Nuclei executable is whatever is installed at " + path + "; Sulayi " +
 				"records its path and self-reported version but cannot establish that it is a " +
 				"genuine ProjectDiscovery build",
 		},
@@ -163,7 +163,7 @@ func (Engine) Invocation(
 		// template repository holds today, which makes two runs a week apart
 		// incomparable and makes the corpus an unrecorded dependency.
 		return scanner.Invocation{}, errors.New(
-			"no template directory is configured at engines.nuclei.templates. AppSec Framework " +
+			"no template directory is configured at engines.nuclei.templates. Sulayi " +
 				"will not let Nuclei fetch templates for itself: a scan against a corpus that " +
 				"changed overnight is not reproducible, and an unrecorded corpus is an " +
 				"unrecorded dependency")
@@ -223,7 +223,7 @@ func (Engine) Invocation(
 		// unannounced network egress and a disclosure of what is being tested.
 		"-no-interactsh",
 
-		// No update check. It is a network call AppSec did not ask for, and a
+		// No update check. It is a network call Sulayi did not ask for, and a
 		// corpus that updates itself mid-assessment is not reproducible.
 		"-disable-update-check",
 
@@ -273,7 +273,7 @@ func (Engine) Invocation(
 			Version:        a.Version,
 			ExecutablePath: a.Path,
 			RuleSource:     describeTemplates(absTemplates, corpus, allowUnsigned),
-			// AppSec cannot establish that this binary is a genuine
+			// Sulayi cannot establish that this binary is a genuine
 			// ProjectDiscovery build, and does not claim to.
 			Verified: false,
 		},

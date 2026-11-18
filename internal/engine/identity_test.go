@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // The ledger gained a second dimension in M1. The headline counts must keep

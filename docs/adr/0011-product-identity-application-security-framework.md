@@ -1,6 +1,6 @@
 # ADR-0011: The product is Application Security Framework, and the CLI is `appsec`
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0018](0018-product-identity-sulayi.md)
 - **Date:** 2026-09-06
 
 ## Context

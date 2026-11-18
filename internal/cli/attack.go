@@ -16,26 +16,30 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/config"
-	"github.com/jaylordibe/application-security-framework/internal/discovery"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
-	"github.com/jaylordibe/application-security-framework/internal/outcome"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/nuclei"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/sast"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/zap"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
-	"github.com/jaylordibe/application-security-framework/internal/store"
+	"github.com/jaylordibe/sulayi/internal/adapter"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/config"
+	"github.com/jaylordibe/sulayi/internal/discovery"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/outcome"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/scanner/nuclei"
+	"github.com/jaylordibe/sulayi/internal/scanner/sast"
+	"github.com/jaylordibe/sulayi/internal/scanner/zap"
+	"github.com/jaylordibe/sulayi/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/store"
 )
 
-func newScanCommand(stdout, stderr io.Writer) *cobra.Command {
+// legacyConfigFile is the configuration file name used before the project was
+// renamed to Sulayi. It is recognised only to refuse it with a clear message.
+const legacyConfigFile = "appsec.yaml"
+
+func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 	var (
 		configPath string
 		specFile   string
@@ -46,12 +50,12 @@ func newScanCommand(stdout, stderr io.Writer) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "scan [target-url]",
+		Use:   "attack [target-url]",
 		Short: "Assess a target application",
 		Long: "Assess an application you own or are explicitly authorized to test.\n\n" +
-			"The target URL you supply is the authorization you are giving: AppSec\n" +
-			"Framework will contact that origin and nothing else unless you widen\n" +
-			"the scope in appsec.yaml.",
+			"The target URL you supply is the authorization you are giving: Sulayi\n" +
+			"will contact that origin and nothing else unless you widen\n" +
+			"the scope in sulayi.yaml.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := resolveConfig(configPath, args)
@@ -83,16 +87,16 @@ func newScanCommand(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to appsec.yaml (default: ./appsec.yaml if present)")
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to sulayi.yaml (default: ./sulayi.yaml if present)")
 	cmd.Flags().StringVar(&specFile, "spec", "", "path to an OpenAPI document on disk")
 	cmd.Flags().StringVar(&specURL, "spec-url", "", "URL of an OpenAPI document served by the target")
 	cmd.Flags().StringVar(&profile, "profile", "", "safety profile: discovery, verification, intrusive")
-	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "run output directory (default: .appsec)")
+	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "run output directory (default: .sulayi)")
 	cmd.Flags().BoolVar(&noProbe, "no-probe", false, "do not probe well-known specification paths")
 	return cmd
 }
 
-// resolveConfig loads appsec.yaml if present, then applies the positional target.
+// resolveConfig loads sulayi.yaml if present, then applies the positional target.
 //
 // The URL the operator typed is treated as the authorization they granted: the
 // target's own origin is always in scope, and loopback targets enable private
@@ -103,8 +107,17 @@ func resolveConfig(configPath string, args []string) (config.Config, error) {
 
 	path := configPath
 	if path == "" {
-		if _, err := os.Stat("appsec.yaml"); err == nil {
-			path = "appsec.yaml"
+		if _, err := os.Stat("sulayi.yaml"); err == nil {
+			path = "sulayi.yaml"
+		} else if _, err := os.Stat(legacyConfigFile); err == nil {
+			// Running with defaults would silently drop the operator's scope,
+			// exclusions and identities, so a configuration under the old name
+			// stops the run rather than being ignored.
+			return config.Config{}, fail(ExitUsage,
+				"found %s but no sulayi.yaml.\n\n"+
+					"  This project was renamed to Sulayi. Rename the file to sulayi.yaml and\n"+
+					"  set apiVersion: %s, or pass it explicitly with --config.",
+				legacyConfigFile, config.CurrentAPIVersion)
 		}
 	}
 	if path != "" {
@@ -120,8 +133,8 @@ func resolveConfig(configPath string, args []string) (config.Config, error) {
 	}
 	if cfg.Target.BaseURL == "" {
 		return config.Config{}, fail(ExitUsage,
-			"no target given.\n\n  Try:  appsec scan http://localhost:3000\n"+
-				"  Or:   appsec init    (to create an appsec.yaml)")
+			"no target given.\n\n  Try:  sulayi attack http://localhost:3000\n"+
+				"  Or:   sulayi init    (to create a sulayi.yaml)")
 	}
 	if !strings.Contains(cfg.Target.BaseURL, "://") {
 		cfg.Target.BaseURL = "http://" + cfg.Target.BaseURL
@@ -187,11 +200,11 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 	defer client.Close()
 
 	if cfg.Scope.AllowPrivateAddresses {
-		fmt.Fprintf(stderr, "appsec: scope: %s (private addresses permitted for this target)\n", cfg.Target.BaseURL)
+		fmt.Fprintf(stderr, "sulayi: scope: %s (private addresses permitted for this target)\n", cfg.Target.BaseURL)
 	}
 	if !store.PermissionsEnforced() {
 		fmt.Fprintln(stderr,
-			"appsec: warning: this platform does not enforce owner-only file permissions, "+
+			"sulayi: warning: this platform does not enforce owner-only file permissions, "+
 				"so the run directory may be readable by other users")
 	}
 
@@ -213,7 +226,7 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 			Now:          now,
 		})
 		for _, f := range collected.Failures {
-			fmt.Fprintf(stderr, "appsec: %s\n", f)
+			fmt.Fprintf(stderr, "sulayi: %s\n", f)
 		}
 		merged = adapter.MergeInto(surface.Operations, collected.Documents, func() model.Source {
 			return model.Source{ObservedAt: now()}
@@ -236,7 +249,7 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 			for _, op := range merged.DiscoveredOperations {
 				surface.AdapterDiscovered = append(surface.AdapterDiscovered, op.ID)
 			}
-			fmt.Fprintf(stderr, "appsec: %d operation(s) reported by an adapter are absent from "+
+			fmt.Fprintf(stderr, "sulayi: %d operation(s) reported by an adapter are absent from "+
 				"the specification and were added to the assessed surface\n",
 				len(merged.DiscoveredOperations))
 		}
@@ -269,11 +282,11 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 		surface.DiscoveryBytes = found.Bytes
 
 		if n := len(m.Undocumented); n > 0 {
-			fmt.Fprintf(stderr, "appsec: discovery found %d path(s) no specification or adapter "+
+			fmt.Fprintf(stderr, "sulayi: discovery found %d path(s) no specification or adapter "+
 				"describes; each is recorded as untested\n", n)
 		}
 		if found.Incomplete {
-			fmt.Fprintln(stderr, "appsec: discovery stopped at a budget, so the discovered "+
+			fmt.Fprintln(stderr, "sulayi: discovery stopped at a budget, so the discovered "+
 				"surface below is a floor rather than a total")
 		}
 	}
@@ -296,11 +309,11 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 	identities := identity.Resolve(cfg.IdentityModels(), cfg.Target.BaseURL, client, red)
 	for _, st := range identities.Statuses() {
 		if !st.Usable {
-			fmt.Fprintf(stderr, "appsec: identity %s: credential unavailable from %s (%s); "+
+			fmt.Fprintf(stderr, "sulayi: identity %s: credential unavailable from %s (%s); "+
 				"no authenticated control request will be made\n", st.ID, st.Source, st.Problem)
 		}
 		for _, w := range st.Warnings {
-			fmt.Fprintf(stderr, "appsec: identity %s: warning: %s\n", st.ID, w)
+			fmt.Fprintf(stderr, "sulayi: identity %s: warning: %s\n", st.ID, w)
 		}
 	}
 
@@ -326,7 +339,7 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 	}
 
 	if len(fixtures) > 0 && identities.Len() < 2 {
-		fmt.Fprintln(stderr, "appsec: warning: resource fixtures are configured but fewer than two "+
+		fmt.Fprintln(stderr, "sulayi: warning: resource fixtures are configured but fewer than two "+
 			"identities are; a cross-owner boundary needs an owner and a non-owner, so no "+
 			"cross-owner work can run")
 	}
@@ -350,7 +363,7 @@ func runScan(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) e
 		Now:          now,
 	})
 	for _, f := range engines.Failures {
-		fmt.Fprintf(stderr, "appsec: %s\n", f)
+		fmt.Fprintf(stderr, "sulayi: %s\n", f)
 	}
 
 	res, err := engine.Run(ctx, engine.Options{
@@ -447,24 +460,24 @@ func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now 
 					"was assessed\n\n  %v\n\n"+
 					"  This is a refusal, not a clean result. Cloud metadata addresses are\n"+
 					"  always denied. To assess a different host, widen scope deliberately:\n"+
-					"    scope.include in appsec.yaml", scopeRefusal)
+					"    scope.include in sulayi.yaml", scopeRefusal)
 		}
 		if raw == nil && parseFailure != nil {
 			return engine.Surface{}, fmt.Errorf(
 				"a document was served at a well-known path but could not be parsed\n\n"+
 					"  %v\n\n"+
-					"  This is a parse failure, not an absence. Point AppSec Framework at a valid\n"+
+					"  This is a parse failure, not an absence. Point Sulayi at a valid\n"+
 					"  document:\n"+
-					"    appsec scan <target> --spec ./openapi.json", parseFailure)
+					"    sulayi attack <target> --spec ./openapi.json", parseFailure)
 		}
 		if raw == nil {
 			return engine.Surface{}, fmt.Errorf(
 				"no OpenAPI document found.\n\n" +
-					"  AppSec Framework derives what should be protected from the application's own\n" +
+					"  Sulayi derives what should be protected from the application's own\n" +
 					"  specification. Without one it has no oracle and would be guessing.\n\n" +
 					"  Point it at a document:\n" +
-					"    appsec scan <target> --spec ./openapi.json\n" +
-					"    appsec scan <target> --spec-url <target>/api/docs-json")
+					"    sulayi attack <target> --spec ./openapi.json\n" +
+					"    sulayi attack <target> --spec-url <target>/api/docs-json")
 		}
 	default:
 		return engine.Surface{}, fmt.Errorf("no specification configured and probing is disabled")

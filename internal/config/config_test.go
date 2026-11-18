@@ -12,7 +12,7 @@ func parse(t *testing.T, yaml string) (Config, error) {
 }
 
 const minimal = `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 `
@@ -28,7 +28,7 @@ func TestMinimalConfigLoadsWithDefaults(t *testing.T) {
 	if !cfg.ShouldExcludeAuthEndpoints() {
 		t.Error("authentication endpoints must be excluded by default")
 	}
-	if cfg.Output.Dir != ".appsec" {
+	if cfg.Output.Dir != ".sulayi" {
 		t.Errorf("default output dir = %q", cfg.Output.Dir)
 	}
 }
@@ -73,10 +73,10 @@ func TestInvalidProfileIsRejected(t *testing.T) {
 
 func TestTargetValidation(t *testing.T) {
 	cases := map[string]string{
-		"missing":            "apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: \"\"\n",
-		"unsupported scheme": "apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: file:///etc/passwd\n",
-		"no host":            "apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: http://\n",
-		"embedded creds":     "apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: http://u:p@x.test\n",
+		"missing":            "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: \"\"\n",
+		"unsupported scheme": "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: file:///etc/passwd\n",
+		"no host":            "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: http://\n",
+		"embedded creds":     "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: http://u:p@x.test\n",
 	}
 	for name, doc := range cases {
 		if _, err := parse(t, doc); err == nil {
@@ -86,9 +86,19 @@ func TestTargetValidation(t *testing.T) {
 }
 
 func TestUnsupportedAPIVersionIsRejected(t *testing.T) {
-	_, err := parse(t, "apiVersion: appsec/v99\ntarget:\n  baseURL: http://x.test\n")
+	_, err := parse(t, "apiVersion: sulayi/v99\ntarget:\n  baseURL: http://x.test\n")
 	if err == nil || !strings.Contains(err.Error(), "apiVersion") {
 		t.Fatalf("error = %v, want an apiVersion rejection", err)
+	}
+}
+
+// A configuration from before the rename gets a migration message, not the
+// generic "unsupported" one, so the fix is obvious.
+func TestLegacyAPIVersionNamesTheMigration(t *testing.T) {
+	_, err := parse(t, "apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: http://x.test\n")
+	if err == nil || !strings.Contains(err.Error(), "renamed to Sulayi") ||
+		!strings.Contains(err.Error(), CurrentAPIVersion) {
+		t.Fatalf("error = %v, want a rename migration message naming %s", err, CurrentAPIVersion)
 	}
 }
 
@@ -125,7 +135,7 @@ func TestErrorCodePointerMustBeAJSONPointer(t *testing.T) {
 
 // The target's own origin is always in scope; nothing else is.
 func TestScopePolicyAlwaysIncludesTheTarget(t *testing.T) {
-	cfg, err := parse(t, "apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: http://localhost:3000\n"+
+	cfg, err := parse(t, "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: http://localhost:3000\n"+
 		"scope:\n  allowPrivateAddresses: true\n")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -166,7 +176,7 @@ func TestMalformedYAMLProducesAReadableError(t *testing.T) {
 // Identity configuration is where a credential could most easily be committed
 // by accident, so every rejection here is a guard rail rather than a nicety.
 func TestIdentityConfigurationIsValidated(t *testing.T) {
-	const head = "apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: http://localhost:3000\n"
+	const head = "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: http://localhost:3000\n"
 	tests := []struct {
 		name    string
 		yaml    string
@@ -180,7 +190,7 @@ func TestIdentityConfigurationIsValidated(t *testing.T) {
     authentication:
       type: bearer
       credential:
-        env: APPSEC_ADMIN_TOKEN
+        env: SULAYI_ADMIN_TOKEN
 `,
 		},
 		{
@@ -322,13 +332,13 @@ func TestIdentityConfigurationIsValidated(t *testing.T) {
 // asserts the absence rather than trusting it, because "there is no way to write
 // a secret here" is the property the whole credential design rests on.
 func TestConfigurationCannotCarryACredentialValue(t *testing.T) {
-	cfg, err := parse(t, "apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: http://localhost:3000\n"+
+	cfg, err := parse(t, "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: http://localhost:3000\n"+
 		`identities:
   - id: admin
     authentication:
       type: bearer
       credential:
-        env: APPSEC_ADMIN_TOKEN
+        env: SULAYI_ADMIN_TOKEN
 `)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -337,7 +347,7 @@ func TestConfigurationCannotCarryACredentialValue(t *testing.T) {
 	if len(ids) != 1 {
 		t.Fatalf("identities = %d, want 1", len(ids))
 	}
-	if ids[0].Auth.Credential.Env != "APPSEC_ADMIN_TOKEN" {
+	if ids[0].Auth.Credential.Env != "SULAYI_ADMIN_TOKEN" {
 		t.Errorf("credential reference lost in mapping: %+v", ids[0].Auth.Credential)
 	}
 	// The mapped identity carries a reference, never material.
@@ -350,7 +360,7 @@ func TestConfigurationCannotCarryACredentialValue(t *testing.T) {
 // Resource fixtures address somebody's real data, so every reference and every
 // value is checked before a request can be built from it.
 func TestResourceConfigurationIsValidated(t *testing.T) {
-	const head = "apiVersion: appsec/v1alpha1\n" +
+	const head = "apiVersion: sulayi/v1alpha1\n" +
 		"target:\n  baseURL: http://localhost:3000\n" +
 		"identities:\n" +
 		"  - id: user-a\n    authentication:\n      type: bearer\n      credential: {env: A_TOKEN}\n" +
@@ -383,7 +393,7 @@ func TestResourceConfigurationIsValidated(t *testing.T) {
     nonOwners: [user-b]
     mutation:
       values:
-        status: "appsec-marker"
+        status: "sulayi-marker"
 `,
 		},
 		{
@@ -485,7 +495,7 @@ func TestResourceConfigurationIsValidated(t *testing.T) {
 // rather than being left blank, because "how do we know who owns this" is a
 // question the report has to answer.
 func TestConfiguredFixturesRecordTheirProvenance(t *testing.T) {
-	cfg, err := parse(t, "apiVersion: appsec/v1alpha1\n"+
+	cfg, err := parse(t, "apiVersion: sulayi/v1alpha1\n"+
 		"target:\n  baseURL: http://localhost:3000\n"+
 		"identities:\n  - id: user-a\n    authentication:\n      type: bearer\n"+
 		"      credential: {env: A_TOKEN}\n"+

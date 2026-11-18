@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 func newRun(t *testing.T) *Run {
@@ -19,6 +19,49 @@ func newRun(t *testing.T) *Run {
 		t.Fatalf("Create: %v", err)
 	}
 	return r
+}
+
+// The repository Sulayi runs from is usually the application's own, whose
+// .gitignore knows nothing about Sulayi, so the runs directory must ignore
+// itself or committing evidence becomes the default.
+func TestRunsDirectoryIgnoresItself(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Create(root, "testrun", time.Unix(0, 0)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "runs", ".gitignore"))
+	if err != nil {
+		t.Fatalf("runs/.gitignore was not written: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if lines[len(lines)-1] != "*" {
+		t.Errorf("runs/.gitignore = %q; its last rule must be *", data)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("a .gitignore was written in the output root, which the operator may own (stat err = %v)", err)
+	}
+}
+
+// An operator's own runs/.gitignore is never overwritten.
+func TestRunsDirectoryKeepsExistingIgnoreFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "runs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	custom := []byte("# mine\n*\n!keep.txt\n")
+	if err := os.WriteFile(filepath.Join(root, "runs", ".gitignore"), custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(root, "testrun", time.Unix(0, 0)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "runs", ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(custom) {
+		t.Errorf("existing runs/.gitignore was changed to %q", got)
+	}
 }
 
 func TestRunDirectoryIsOwnerOnly(t *testing.T) {

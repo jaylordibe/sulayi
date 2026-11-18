@@ -74,7 +74,7 @@ jobs:
           go-version-file: go.mod
       - name: install Nuclei
         # Pinned, and built from source with the toolchain already present, so
-        # this adds no binary download to the supply chain. AppSec Framework
+        # this adds no binary download to the supply chain. Sulayi
         # itself never does this: installing an engine is the operator's act,
         # and here CI is the operator.
         run: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1
@@ -174,7 +174,7 @@ jobs:
         # reference, and their licence permits internal use only.
         run: |
           if grep -rIn --exclude-dir=.git --exclude-dir=docs -E '\bp/(default|security-audit|owasp-top-ten|ci)\b' . \
-              | grep -v 'appsec:refuses-registry'; then
+              | grep -v 'sulayi:refuses-registry'; then
             echo "::error::Semgrep registry rules may not be referenced; their licence permits internal use only"
             exit 1
           fi

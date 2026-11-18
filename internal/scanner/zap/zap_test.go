@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // A ZAP JSON report of the shape `zap.sh -cmd -quickout` writes.
@@ -37,7 +37,7 @@ func normalize(t *testing.T, body string, s scanner.Settings) scanner.Normalized
 }
 
 // ZAP's own risk and confidence scales must survive intact. Four risks and five
-// confidences do not map onto AppSec's scales, and converting would invent an
+// confidences do not map onto Sulayi's scales, and converting would invent an
 // assessment nobody made.
 func TestNormalizePreservesZAPScalesVerbatim(t *testing.T) {
 	n := normalize(t, sample, scanner.Settings{Extra: map[string]string{"mode": "active"}})
@@ -81,15 +81,15 @@ func TestPassiveModeClaimsNoActiveCoverage(t *testing.T) {
 	}
 }
 
-// Active scanning is an attack and must be gated at intrusive; passive is not.
-func TestProfileGatingFollowsMode(t *testing.T) {
-	if got := (Engine{}).RequiredProfile(scanner.Settings{}); got != model.ProfileVerification {
-		t.Errorf("passive required profile = %s, want verification", got)
-	}
-	got := Engine{}.RequiredProfile(scanner.Settings{Extra: map[string]string{"mode": "active"}})
-	if got != model.ProfileIntrusive {
-		t.Errorf("active required profile = %s, want intrusive: the active scanner sends attack "+
-			"payloads", got)
+// Every ZAP mode is gated at intrusive. Passive mode's passivity is unproven
+// (it relies on -quickprogress, documented only as a progress display), so it
+// must not run at the default profile until that is shown against a real ZAP.
+func TestProfileGatingIsIntrusiveInEveryMode(t *testing.T) {
+	for _, m := range []string{"", "passive", "active", "PASSIVE"} {
+		s := scanner.Settings{Extra: map[string]string{"mode": m}}
+		if got := (Engine{}).RequiredProfile(s); got != model.ProfileIntrusive {
+			t.Errorf("mode %q required profile = %s, want intrusive", m, got)
+		}
 	}
 }
 
@@ -153,7 +153,7 @@ func TestLimitationsAreStated(t *testing.T) {
 	n := normalize(t, sample, scanner.Settings{})
 	for _, want := range []string{
 		"does not pass identity credentials",
-		"which AppSec Framework does not pin",
+		"which Sulayi does not pin",
 		"cannot constrain where a ZAP rule sends a request",
 	} {
 		if !mentions(n.Limitations, want) {

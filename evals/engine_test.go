@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/proc"
-	"github.com/jaylordibe/application-security-framework/internal/report"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/proc"
+	"github.com/jaylordibe/sulayi/internal/report"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // buildEngine compiles a fake engine binary.
@@ -56,7 +56,7 @@ type jsonlEngine struct {
 func (j jsonlEngine) Meta() scanner.Meta {
 	return scanner.Meta{
 		ID: "fakescan", Title: "FakeScan", Capabilities: j.caps,
-		Unlocks:     "a weakness class AppSec Framework does not test natively",
+		Unlocks:     "a weakness class Sulayi does not test natively",
 		InstallHint: "it is a test fixture",
 	}
 }
@@ -158,12 +158,12 @@ func TestM4_ExternalAlertTravelsThePipelineAsAnObservation(t *testing.T) {
 	}
 	f := res.Findings[0]
 
-	// The engine said critical. AppSec says it has not judged it.
+	// The engine said critical. Sulayi says it has not judged it.
 	if f.State != model.StateObserved {
 		t.Errorf("state = %s, want observed", f.State)
 	}
 	if f.Severity != model.SeverityUnassessed {
-		t.Errorf("severity = %s; the engine's 'critical' must not become an AppSec severity",
+		t.Errorf("severity = %s; the engine's 'critical' must not become a Sulayi severity",
 			f.Severity)
 	}
 	if f.External == nil {
@@ -312,7 +312,7 @@ func TestM4_SuccessfulEngineQualifiesRatherThanErasesCoverage(t *testing.T) {
 			if !strings.Contains(c, "assessed by fakescan 1.2.3") {
 				t.Errorf("the class was not qualified with the engine and version: %q", c)
 			}
-			if !strings.Contains(c, "not verified by AppSec Framework") {
+			if !strings.Contains(c, "not verified by Sulayi") {
 				t.Errorf("the qualification does not say the results are unverified: %q", c)
 			}
 			if !strings.Contains(c, "fixture corpus at commit abc1234") {

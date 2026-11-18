@@ -14,11 +14,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/adapter"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // SchemaVersion identifies the output contract. It is the first field of every
@@ -27,7 +27,7 @@ import (
 // Consumers must treat an unrecognised blocked cause, outcome or finding state
 // as blocked rather than as success. Within a major version, fields are added
 // but never removed or repurposed.
-const SchemaVersion = "appsec.report/v1alpha1"
+const SchemaVersion = "sulayi.report/v1alpha1"
 
 // Document is the JSON report.
 type Document struct {
@@ -213,8 +213,8 @@ type EngineRun struct {
 	// ExecutablePath says which program ran, rather than which name was on
 	// PATH.
 	ExecutablePath string `json:"executablePath,omitempty"`
-	// ProvenanceVerified is false for anything a user installed. AppSec
-	// Framework cannot establish that a binary is a genuine upstream build and
+	// ProvenanceVerified is false for anything a user installed. Sulayi
+	// cannot establish that a binary is a genuine upstream build and
 	// does not imply a chain of custody it has not checked.
 	ProvenanceVerified bool `json:"provenanceVerified"`
 	// RuleSource identifies the templates or rules that ran, which is what
@@ -340,7 +340,7 @@ type Finding struct {
 	ResourceID  string   `json:"resourceId,omitempty"`
 	OwnerID     string   `json:"ownerIdentityId,omitempty"`
 	// External carries the engine's own account of an imported observation.
-	// Its severity and confidence are the engine's scales, not AppSec's.
+	// Its severity and confidence are the engine's scales, not Sulayi's.
 	External     *ExternalSource `json:"externalSource,omitempty"`
 	Expected     string          `json:"expected"`
 	Actual       string          `json:"actual"`
@@ -358,8 +358,8 @@ type ExternalSource struct {
 	RunID          string `json:"runId,omitempty"`
 	RuleID         string `json:"ruleId"`
 	RuleName       string `json:"ruleName,omitempty"`
-	// Severity and Confidence are the engine's own values, unconverted. AppSec
-	// Framework's severity for these findings is "unassessed", which is the
+	// Severity and Confidence are the engine's own values, unconverted. Sulayi's
+	// severity for these findings is "unassessed", which is the
 	// truthful answer: it has not judged them.
 	Severity       string   `json:"sourceSeverity,omitempty"`
 	Confidence     string   `json:"sourceConfidence,omitempty"`
@@ -403,7 +403,7 @@ type CoverageEntry struct {
 func Build(res engine.Result, version string) Document {
 	doc := Document{
 		SchemaVersion: SchemaVersion,
-		Tool:          Tool{Name: "application-security-framework", Version: version},
+		Tool:          Tool{Name: "sulayi", Version: version},
 		Run: Run{
 			ID:                     res.RunID,
 			Target:                 res.Target,
@@ -739,7 +739,7 @@ func surfaceCompletenessStatement(res engine.Result) string {
 	ran := len(sf.DiscoveryAttempts) > 0
 	if !ran {
 		return "This ledger enumerates only the operations declared in the specification " +
-			"AppSec Framework was given. Discovery of undocumented surface did not run, so " +
+			"Sulayi was given. Discovery of undocumented surface did not run, so " +
 			"routes that exist but are not documented were not found, are not counted here, " +
 			"and were not tested. Coverage is therefore relative to the specification, not to " +
 			"the application."
@@ -865,7 +865,7 @@ func WriteJSON(w io.Writer, doc Document) error {
 // Summary renders a short human-readable result for a terminal.
 func Summary(doc Document) string {
 	var b strings.Builder
-	b.WriteString("AppSec Framework assessment " + doc.Run.ID + "\n")
+	b.WriteString("Sulayi assessment " + doc.Run.ID + "\n")
 	b.WriteString("  target:   " + doc.Run.Target + "\n")
 	b.WriteString("  profile:  " + doc.Run.Profile + "\n")
 	b.WriteString("  surface:  " + strconv.Itoa(doc.Surface.OperationCount) + " operations from " +
@@ -1017,11 +1017,11 @@ func Summary(doc Document) string {
 		}
 		if n := observedCount(doc.Findings); n > 0 {
 			sentence := strconv.Itoa(n) + " external results are recorded as observed. They are " +
-				"another tool's claims, unverified by AppSec Framework, and are not counted as " +
+				"another tool's claims, unverified by Sulayi, and are not counted as " +
 				"confirmed or suspected findings."
 			if n == 1 {
 				sentence = "1 external result is recorded as observed. It is another tool's " +
-					"claim, unverified by AppSec Framework, and is not counted as a confirmed " +
+					"claim, unverified by Sulayi, and is not counted as a confirmed " +
 					"or suspected finding."
 			}
 			b.WriteString(wrap(sentence, 76, "  "))

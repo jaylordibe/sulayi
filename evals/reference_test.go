@@ -15,11 +15,11 @@
 // real assessment against a real application and asserts the invariants that
 // must hold whatever that application is.
 //
-// It skips unless APPSEC_REFERENCE_TARGET is set, so it costs a contributor
+// It skips unless SULAYI_REFERENCE_TARGET is set, so it costs a contributor
 // nothing and never makes `go test ./...` depend on a running service.
 //
-//	APPSEC_REFERENCE_TARGET=http://localhost:8000 \
-//	APPSEC_REFERENCE_SPEC=http://localhost:8000/docs/api.json \
+//	SULAYI_REFERENCE_TARGET=http://localhost:8000 \
+//	SULAYI_REFERENCE_SPEC=http://localhost:8000/docs/api.json \
 //	go test -v -run TestReferenceApplication ./evals/
 package evals
 
@@ -34,29 +34,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/report"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/report"
+	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // referenceRun performs one assessment against the configured application.
 func referenceRun(t *testing.T) (engine.Result, report.Document) {
 	t.Helper()
-	target := os.Getenv("APPSEC_REFERENCE_TARGET")
-	specURL := os.Getenv("APPSEC_REFERENCE_SPEC")
+	target := os.Getenv("SULAYI_REFERENCE_TARGET")
+	specURL := os.Getenv("SULAYI_REFERENCE_SPEC")
 	if target == "" || specURL == "" {
-		t.Skip("set APPSEC_REFERENCE_TARGET and APPSEC_REFERENCE_SPEC to assess a running " +
+		t.Skip("set SULAYI_REFERENCE_TARGET and SULAYI_REFERENCE_SPEC to assess a running " +
 			"reference application")
 	}
 
 	origin, err := scope.ParseOrigin(target)
 	if err != nil {
-		t.Fatalf("APPSEC_REFERENCE_TARGET is not a usable origin: %v", err)
+		t.Fatalf("SULAYI_REFERENCE_TARGET is not a usable origin: %v", err)
 	}
 	pol, err := scope.New([]scope.Entry{{Host: origin.Host, Ports: []int{origin.Port}}}, true)
 	if err != nil {

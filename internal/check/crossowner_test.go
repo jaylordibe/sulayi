@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 func jsonResp(body string) *model.CapturedResponse {
@@ -111,7 +111,7 @@ func TestSameResourceRefusesTruncatedBodies(t *testing.T) {
 // A write is credited only when the owner's view did not have the value before
 // and does after. Anything weaker attributes somebody else's change to the probe.
 func TestMutationApplied(t *testing.T) {
-	wrote := map[string]any{"status": "appsec-m2-marker"}
+	wrote := map[string]any{"status": "sulayi-m2-marker"}
 
 	tests := []struct {
 		name    string
@@ -124,7 +124,7 @@ func TestMutationApplied(t *testing.T) {
 		{
 			name:    "value changed to what was written",
 			before:  `{"id":"o1","status":"paid"}`,
-			after:   `{"id":"o1","status":"appsec-m2-marker"}`,
+			after:   `{"id":"o1","status":"sulayi-m2-marker"}`,
 			want:    true,
 			mention: "status changed from",
 		},
@@ -137,8 +137,8 @@ func TestMutationApplied(t *testing.T) {
 		},
 		{
 			name:   "already had the written value",
-			before: `{"id":"o1","status":"appsec-m2-marker"}`,
-			after:  `{"id":"o1","status":"appsec-m2-marker"}`,
+			before: `{"id":"o1","status":"sulayi-m2-marker"}`,
+			after:  `{"id":"o1","status":"sulayi-m2-marker"}`,
 			want:   false,
 			why:    "the write cannot be credited for a value that was already there",
 		},
@@ -152,7 +152,7 @@ func TestMutationApplied(t *testing.T) {
 		{
 			name:    "value inside a data envelope",
 			before:  `{"data":{"id":"o1","status":"paid"}}`,
-			after:   `{"data":{"id":"o1","status":"appsec-m2-marker"}}`,
+			after:   `{"data":{"id":"o1","status":"sulayi-m2-marker"}}`,
 			want:    true,
 			mention: "status changed from",
 		},

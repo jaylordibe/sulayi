@@ -1,6 +1,6 @@
 // Package proc supervises untrusted subprocesses.
 //
-// AppSec Framework runs two kinds of foreign program: framework adapters, which
+// Sulayi runs two kinds of foreign program: framework adapters, which
 // read an application's source, and external scanning engines, which attack it.
 // Neither is trusted. Both can hang, fork, ignore signals, flood their pipes,
 // print secrets or lie about what they are.

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 func op(method, path string) model.Operation {

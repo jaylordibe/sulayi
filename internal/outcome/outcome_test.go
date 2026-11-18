@@ -3,7 +3,7 @@ package outcome
 import (
 	"testing"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 func resp(status int, contentType, body string) *model.CapturedResponse {

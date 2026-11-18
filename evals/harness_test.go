@@ -1,4 +1,4 @@
-// Package evals is the AppSec Framework evaluation harness.
+// Package evals is the Sulayi evaluation harness.
 //
 // Evaluation is part of the product, not an afterthought. Every security-relevant
 // behaviour is paired: a KNOWN VULNERABLE fixture that must be detected, and a
@@ -21,13 +21,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // spec is a minimal OpenAPI document declaring one protected and one public

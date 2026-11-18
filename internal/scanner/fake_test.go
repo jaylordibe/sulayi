@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/proc"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/proc"
 )
 
 // The adversarial engine suite.
@@ -250,18 +250,18 @@ func TestEngineEnvironmentIsBuiltFromNothing(t *testing.T) {
 	// HOME, and this test is about what the *engine* inherits, not the compiler.
 	bin := buildFake(t, "fake", fakePreamble+body+"\n}\n")
 
-	t.Setenv("APPSEC_ADMIN_TOKEN", "identity-bearer-token")
+	t.Setenv("SULAYI_ADMIN_TOKEN", "identity-bearer-token")
 	t.Setenv("GITHUB_TOKEN", "ghp_secret")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
 	t.Setenv("PGPASSWORD", "db-password")
-	t.Setenv("HOME", "/home/appsec")
+	t.Setenv("HOME", "/home/sulayi")
 
 	t.Run("nothing is inherited by default", func(t *testing.T) {
 		out := Run(context.Background(), &fakeEngine{bin: bin},
 			Target{Profile: model.ProfileVerification},
 			Settings{Enabled: true, TimeoutSeconds: 20}, Options{})
 		for _, leaked := range []string{
-			"APPSEC_ADMIN_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "PGPASSWORD",
+			"SULAYI_ADMIN_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "PGPASSWORD",
 		} {
 			if strings.Contains(out.Stderr, leaked) {
 				t.Errorf("%s reached the engine's environment", leaked)
@@ -279,7 +279,7 @@ func TestEngineEnvironmentIsBuiltFromNothing(t *testing.T) {
 		if !strings.Contains(out.Stderr, "HOME") {
 			t.Errorf("a declared variable did not reach the engine: %q", out.Stderr)
 		}
-		if strings.Contains(out.Stderr, "APPSEC_ADMIN_TOKEN") {
+		if strings.Contains(out.Stderr, "SULAYI_ADMIN_TOKEN") {
 			t.Error("declaring one variable leaked another")
 		}
 	})
@@ -287,10 +287,10 @@ func TestEngineEnvironmentIsBuiltFromNothing(t *testing.T) {
 	t.Run("identity credentials are refused even when configured", func(t *testing.T) {
 		out := Run(context.Background(), &fakeEngine{bin: bin},
 			Target{Profile: model.ProfileVerification},
-			Settings{Enabled: true, TimeoutSeconds: 20, PassEnv: []string{"APPSEC_ADMIN_TOKEN", "HOME"}},
-			Options{ForbiddenEnv: []string{"APPSEC_ADMIN_TOKEN"}})
+			Settings{Enabled: true, TimeoutSeconds: 20, PassEnv: []string{"SULAYI_ADMIN_TOKEN", "HOME"}},
+			Options{ForbiddenEnv: []string{"SULAYI_ADMIN_TOKEN"}})
 
-		if strings.Contains(out.Stderr, "APPSEC_ADMIN_TOKEN") {
+		if strings.Contains(out.Stderr, "SULAYI_ADMIN_TOKEN") {
 			t.Fatal("an identity credential reached an external engine despite being forbidden")
 		}
 		if !strings.Contains(out.Stderr, "HOME") {
@@ -492,13 +492,13 @@ func TestExternalAlertsAreOnlyEverObserved(t *testing.T) {
 			t.Errorf("source severity %q produced state %s, want observed", sev, f.State)
 		}
 		if f.Severity != model.SeverityUnassessed {
-			t.Errorf("source severity %q was translated into AppSec severity %s", sev, f.Severity)
+			t.Errorf("source severity %q was translated into Sulayi severity %s", sev, f.Severity)
 		}
 		if f.External == nil || f.External.Severity != sev {
 			t.Errorf("the engine's own severity was not preserved verbatim: %+v", f.External)
 		}
 		if f.Verification.Performed {
-			t.Error("an imported alert claimed AppSec verification")
+			t.Error("an imported alert claimed Sulayi verification")
 		}
 		// It must not be able to fail a build on its own.
 		if f.Severity.AtLeast(model.SeverityLow) {
@@ -550,13 +550,13 @@ func TestImportedFindingsHaveDistinctStableIdentities(t *testing.T) {
 	}
 }
 
-// An engine must not write into the directory the operator ran appsec from.
+// An engine must not write into the directory the operator ran sulayi from.
 //
 // Found during the product validation gate: the environment handed to an engine
 // is built from nothing, so it has no HOME, and Nuclei responds by creating a
 // `.nuclei-config` tree in its working directory. The scan itself is contained
 // by its workspace, but the version probe that runs first had no directory at
-// all, so `appsec doctor` and every scan left that tree in the operator's
+// all, so `sulayi doctor` and every scan left that tree in the operator's
 // project — and in this repository, in two package directories.
 func TestVersionProbeDoesNotRunInTheWorkingDirectory(t *testing.T) {
 	bin := buildFake(t, "cwd", `package main

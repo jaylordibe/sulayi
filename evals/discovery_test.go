@@ -15,16 +15,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/discovery"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/report"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/adapter"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/discovery"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/report"
+	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // m5Spec documents one route. The fixture application serves five more.

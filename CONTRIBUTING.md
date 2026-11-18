@@ -1,7 +1,7 @@
-# Contributing to Application Security Framework
+# Contributing to Sulayi
 
 Thank you for considering it. This document is short on ceremony and specific about the
-few rules that matter, because AppSec Framework is security software and some mistakes
+few rules that matter, because Sulayi is security software and some mistakes
 here are worse than a bug.
 
 ## The one rule
@@ -14,8 +14,8 @@ green check mark that is not true is the failure mode this project exists to pre
 ## Getting started
 
 ```bash
-git clone https://github.com/jaylordibe/application-security-framework
-cd application-security-framework
+git clone https://github.com/jaylordibe/sulayi
+cd sulayi
 make check       # fmt, vet, staticcheck, test, race, govulncheck
 ```
 

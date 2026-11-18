@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/proc"
+	"github.com/jaylordibe/sulayi/internal/proc"
 )
 
 // Running an adapter means running a program the operator chose, against a
@@ -91,7 +91,7 @@ type Options struct {
 	// Trust says whether target-code execution is authorised.
 	Trust TrustMode
 	// ForbiddenEnv names variables that must never reach an adapter whatever the
-	// operator asks for. These are AppSec's own identity credentials: forwarding
+	// operator asks for. These are Sulayi's own identity credentials: forwarding
 	// one would hand a third-party binary the token it uses to authenticate to
 	// the application it is assessing.
 	ForbiddenEnv []string

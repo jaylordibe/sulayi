@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jaylordibe/application-security-framework/internal/config"
-	"github.com/jaylordibe/application-security-framework/internal/report"
+	"github.com/jaylordibe/sulayi/internal/config"
+	"github.com/jaylordibe/sulayi/internal/report"
 )
 
 // devVersion is what a build reports when nothing better is known.
@@ -29,7 +29,7 @@ var Version = devVersion
 // learn their version differently, so asking only one of them was wrong:
 //
 //   - A release build from the Makefile has it injected with -ldflags.
-//   - `go install <module>/cmd/appsec@v0.1.0` runs the compiler directly and
+//   - `go install <module>/cmd/sulayi@v0.1.0` runs the compiler directly and
 //     never sees the Makefile, so the ldflags value stays "0.0.0-dev". The Go
 //     toolchain does record the module version it resolved, and that is the
 //     authoritative answer for exactly the installation path the README tells a
@@ -99,7 +99,7 @@ func newVersionCommand(stdout io.Writer) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			var b strings.Builder
-			fmt.Fprintf(&b, "appsec %s\n", resolveVersion())
+			fmt.Fprintf(&b, "sulayi %s\n", resolveVersion())
 			fmt.Fprintf(&b, "  go:        %s\n", runtime.Version())
 			fmt.Fprintf(&b, "  platform:  %s/%s\n", runtime.GOOS, runtime.GOARCH)
 			fmt.Fprintf(&b, "  schema:    report %s, config %s\n",

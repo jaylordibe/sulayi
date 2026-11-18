@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/redact"
 )
 
 // Liveness is what is known about whether an identity can still authenticate.

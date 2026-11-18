@@ -1,4 +1,4 @@
-// Package adapter defines the contract between AppSec Framework and framework
+// Package adapter defines the contract between Sulayi and framework
 // adapters, and consumes their output as untrusted input.
 //
 // An adapter observes an application's own source or runtime and reports
@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // ContractVersion is the adapter contract this build speaks.
@@ -27,10 +27,10 @@ import (
 // It is the *contract* version, not the adapter's own version. An adapter may
 // ship any version it likes; what the core must agree with it about is the
 // meaning of the document.
-const ContractVersion = "appsec.adapter/v1alpha1"
+const ContractVersion = "sulayi.adapter/v1alpha1"
 
 // contractPrefix is the family every supported version belongs to.
-const contractPrefix = "appsec.adapter/"
+const contractPrefix = "sulayi.adapter/"
 
 // Budgets bound what an adapter may produce.
 //
@@ -114,7 +114,7 @@ func (m ExtractionMethod) Provenance() model.Provenance {
 // Kind is the category of a normalized fact.
 //
 // The set is small on purpose. This is not an application AST: it is the subset
-// of what a framework knows that can change what AppSec tests or how much it
+// of what a framework knows that can change what Sulayi tests or how much it
 // trusts an expectation.
 type Kind string
 

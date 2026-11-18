@@ -10,10 +10,10 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
 )
 
 func sampleResult() engine.Result {
@@ -233,7 +233,7 @@ func TestOutputIsDeterministic(t *testing.T) {
 // contains, the published DTO must contain no credential-derived value at all —
 // not the value, not its length, not a fingerprint of it.
 func TestIdentityReportingCarriesNoCredentialMaterial(t *testing.T) {
-	const secret = "APPSEC_M1_SECRET_MUST_NEVER_PERSIST_7f91"
+	const secret = "SULAYI_M1_SECRET_MUST_NEVER_PERSIST_7f91"
 	res := engine.Result{
 		RunID: "r", Target: "http://localhost:3000", Profile: model.ProfileVerification,
 		Surface: engine.Surface{SpecDerived: true},
@@ -241,7 +241,7 @@ func TestIdentityReportingCarriesNoCredentialMaterial(t *testing.T) {
 			ID:        "admin",
 			Label:     "Administrator",
 			Scheme:    identity.SchemeBearer,
-			Source:    "environment variable APPSEC_ADMIN_TOKEN",
+			Source:    "environment variable SULAYI_ADMIN_TOKEN",
 			Usable:    true,
 			Monitored: true,
 			Liveness:  identity.LivenessGood,
@@ -258,7 +258,7 @@ func TestIdentityReportingCarriesNoCredentialMaterial(t *testing.T) {
 	if got.ID != "admin" || got.Scheme != "bearer" {
 		t.Errorf("identity not published faithfully: %+v", got)
 	}
-	if got.CredentialSource != "environment variable APPSEC_ADMIN_TOKEN" {
+	if got.CredentialSource != "environment variable SULAYI_ADMIN_TOKEN" {
 		t.Errorf("credential source = %q; a location is publishable and must be published", got.CredentialSource)
 	}
 	if got.LastGoodAt == "" {
@@ -418,7 +418,7 @@ func TestSummaryStatesWhatTheEnginesDid(t *testing.T) {
 		t.Errorf("imported results are not accounted for:\n%s", got)
 	}
 	// The whole point: they are reported without being promoted.
-	if !strings.Contains(got, "unverified by AppSec Framework") {
+	if !strings.Contains(got, "unverified by Sulayi") {
 		t.Errorf("the summary does not say these are unverified claims:\n%s", got)
 	}
 }
@@ -453,7 +453,7 @@ func TestSummaryStatesAnIdentityTheTargetRejected(t *testing.T) {
 
 func TestSummaryStatesAnUnusableIdentity(t *testing.T) {
 	got := Summary(Document{Identities: []Identity{{
-		ID: "admin", Usable: false, Problem: "APPSEC_ADMIN_TOKEN is not set",
+		ID: "admin", Usable: false, Problem: "SULAYI_ADMIN_TOKEN is not set",
 	}}})
 	if !strings.Contains(got, "UNUSABLE") || !strings.Contains(got, "is not set") {
 		t.Errorf("an unusable identity is invisible in the terminal:\n%s", got)

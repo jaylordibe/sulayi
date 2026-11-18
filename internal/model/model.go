@@ -67,7 +67,7 @@ const (
 )
 
 // Source records where a single fact came from, so a report can explain why
-// AppSec Framework believes something.
+// Sulayi believes something.
 type Source struct {
 	Kind SourceKind
 	// Ref is a path or URL. It is redacted before it is stored.
@@ -390,7 +390,7 @@ func SortPathCandidates(cs []PathCandidate) {
 	})
 }
 
-// Identity is an actor AppSec Framework may act as. Identities are never invented; they
+// Identity is an actor Sulayi may act as. Identities are never invented; they
 // come from configuration only.
 type Identity struct {
 	ID string
@@ -416,7 +416,7 @@ const (
 	SeverityMedium   Severity = "medium"
 	SeverityHigh     Severity = "high"
 	SeverityCritical Severity = "critical"
-	// SeverityUnassessed means AppSec Framework has not judged how damaging
+	// SeverityUnassessed means Sulayi has not judged how damaging
 	// this would be.
 	//
 	// It exists for findings imported from an external engine. Such a finding
@@ -424,7 +424,7 @@ const (
 	// scale would be inventing an assessment nobody made: a scanner's "critical"
 	// is a statement about a template's category, not about this application's
 	// exposure. So the engine's value is preserved verbatim in ExternalSource
-	// and this field says, truthfully, that AppSec has not formed a view.
+	// and this field says, truthfully, that Sulayi has not formed a view.
 	//
 	// It deliberately has no rank, so it can never satisfy a policy threshold.
 	// An unverified external alert must not fail somebody's build on its own.
@@ -551,7 +551,7 @@ type Finding struct {
 	// engine's own verdict, verbatim.
 	//
 	// It is a pointer so that a native finding carries nothing: the absence of
-	// this field is what distinguishes something AppSec established itself from
+	// this field is what distinguishes something Sulayi established itself from
 	// something another tool reported.
 	External *ExternalSource
 	// ResourceID names the resource fixture a cross-owner finding is about, and
@@ -570,8 +570,8 @@ type Finding struct {
 
 // ExternalSource records where an imported observation came from.
 //
-// Everything here is the engine's own account of itself, kept verbatim. AppSec
-// Framework's severity and confidence live on the Finding and mean something
+// Everything here is the engine's own account of itself, kept verbatim. Sulayi's
+// severity and confidence live on the Finding and mean something
 // different: ZAP emits four risks and five confidences, Nuclei five severities
 // and no confidence at all, and Semgrep a three-value severity. None of those
 // scales maps onto another, and converting between them silently would be

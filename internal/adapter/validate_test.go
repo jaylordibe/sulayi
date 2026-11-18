@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // The conformance suite. An adapter author should be able to read these cases
@@ -16,7 +16,7 @@ import (
 // assessment look better than it is.
 
 const minimalValid = `{
-  "contractVersion": "appsec.adapter/v1alpha1",
+  "contractVersion": "sulayi.adapter/v1alpha1",
   "adapter": {"name": "example", "version": "0.1.0", "extractionMethod": "static-lexical"},
   "facts": []
 }`
@@ -50,7 +50,7 @@ func TestMinimalValidDocumentIsAccepted(t *testing.T) {
 
 func TestFullValidDocumentIsAccepted(t *testing.T) {
 	res := mustParse(t, `{
-	  "contractVersion": "appsec.adapter/v1alpha1",
+	  "contractVersion": "sulayi.adapter/v1alpha1",
 	  "adapter": {"name": "laravel", "version": "0.1.0", "extractionMethod": "static-lexical"},
 	  "target": {"framework": "laravel", "frameworkVersion": "12.x"},
 	  "facts": [
@@ -113,35 +113,35 @@ func TestDocumentsAreRejectedWholesale(t *testing.T) {
 		},
 		{
 			name: "newer unknown contract version",
-			doc: `{"contractVersion":"appsec.adapter/v9",
+			doc: `{"contractVersion":"sulayi.adapter/v9",
 			       "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},"facts":[]}`,
 			wantErr: "not supported by this build",
 		},
 		{
 			name: "unknown top-level field",
-			doc: `{"contractVersion":"appsec.adapter/v1alpha1",
+			doc: `{"contractVersion":"sulayi.adapter/v1alpha1",
 			       "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},
 			       "facts":[],"trustMe":true}`,
 			wantErr: "not a valid contract document",
 		},
 		{
 			name:    "no adapter name",
-			doc:     `{"contractVersion":"appsec.adapter/v1alpha1","adapter":{"version":"1","extractionMethod":"static-lexical"},"facts":[]}`,
+			doc:     `{"contractVersion":"sulayi.adapter/v1alpha1","adapter":{"version":"1","extractionMethod":"static-lexical"},"facts":[]}`,
 			wantErr: "does not name the adapter",
 		},
 		{
 			name:    "adapter name is not an identifier",
-			doc:     `{"contractVersion":"appsec.adapter/v1alpha1","adapter":{"name":"../../etc","version":"1","extractionMethod":"static-lexical"},"facts":[]}`,
+			doc:     `{"contractVersion":"sulayi.adapter/v1alpha1","adapter":{"name":"../../etc","version":"1","extractionMethod":"static-lexical"},"facts":[]}`,
 			wantErr: "not a plain identifier",
 		},
 		{
 			name:    "unknown extraction method",
-			doc:     `{"contractVersion":"appsec.adapter/v1alpha1","adapter":{"name":"x","version":"1","extractionMethod":"vibes"},"facts":[]}`,
+			doc:     `{"contractVersion":"sulayi.adapter/v1alpha1","adapter":{"name":"x","version":"1","extractionMethod":"vibes"},"facts":[]}`,
 			wantErr: "does not know",
 		},
 		{
 			name:    "no extraction method",
-			doc:     `{"contractVersion":"appsec.adapter/v1alpha1","adapter":{"name":"x","version":"1"},"facts":[]}`,
+			doc:     `{"contractVersion":"sulayi.adapter/v1alpha1","adapter":{"name":"x","version":"1"},"facts":[]}`,
 			wantErr: "does not know",
 		},
 	}
@@ -208,7 +208,7 @@ func TestIndividualFactsAreDroppedAndCounted(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := `{"contractVersion":"appsec.adapter/v1alpha1",
+			doc := `{"contractVersion":"sulayi.adapter/v1alpha1",
 			  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},
 			  "facts":[` + tc.fact + `]}`
 			res, err := parseString(t, doc)
@@ -234,7 +234,7 @@ func TestIndividualFactsAreDroppedAndCounted(t *testing.T) {
 // inconvenient fact by appending.
 func TestContradictoryFactsWithdrawBoth(t *testing.T) {
 	res := mustParse(t, `{
-	  "contractVersion":"appsec.adapter/v1alpha1",
+	  "contractVersion":"sulayi.adapter/v1alpha1",
 	  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},
 	  "facts":[
 	    {"kind":"operation.authentication","operation":{"method":"GET","path":"/a"},"value":"required"},
@@ -250,7 +250,7 @@ func TestContradictoryFactsWithdrawBoth(t *testing.T) {
 
 func TestExactDuplicateFactsAreCollapsed(t *testing.T) {
 	res := mustParse(t, `{
-	  "contractVersion":"appsec.adapter/v1alpha1",
+	  "contractVersion":"sulayi.adapter/v1alpha1",
 	  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},
 	  "facts":[
 	    {"kind":"operation.authentication","operation":{"method":"GET","path":"/a"},"value":"required"},
@@ -267,7 +267,7 @@ func TestExactDuplicateFactsAreCollapsed(t *testing.T) {
 func TestHostileStringsAreSanitized(t *testing.T) {
 	long := strings.Repeat("A", MaxStringBytes*2)
 	res := mustParse(t, `{
-	  "contractVersion":"appsec.adapter/v1alpha1",
+	  "contractVersion":"sulayi.adapter/v1alpha1",
 	  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},
 	  "facts":[{"kind":"operation.authentication","operation":{"method":"GET","path":"/a"},
 	    "value":"required","control":"`+long+`",
@@ -287,7 +287,7 @@ func TestHostileStringsAreSanitized(t *testing.T) {
 
 func TestOversizedDocumentIsRejected(t *testing.T) {
 	var b strings.Builder
-	b.WriteString(`{"contractVersion":"appsec.adapter/v1alpha1",
+	b.WriteString(`{"contractVersion":"sulayi.adapter/v1alpha1",
 	  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},"limitations":["`)
 	b.WriteString(strings.Repeat("A", MaxDocumentBytes+16))
 	b.WriteString(`"],"facts":[]}`)
@@ -304,7 +304,7 @@ func TestTooManyFactsIsRejected(t *testing.T) {
 		facts = append(facts, `{"kind":"operation.authentication",`+
 			`"operation":{"method":"GET","path":"/a`+strings.Repeat("b", i%3)+`"},"value":"required"}`)
 	}
-	doc := `{"contractVersion":"appsec.adapter/v1alpha1",
+	doc := `{"contractVersion":"sulayi.adapter/v1alpha1",
 	  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},
 	  "facts":[` + strings.Join(facts, ",") + `]}`
 	if _, err := parseString(t, doc); err == nil {
@@ -315,7 +315,7 @@ func TestTooManyFactsIsRejected(t *testing.T) {
 // Deeply nested JSON must not be able to exhaust the stack during decoding.
 func TestDeeplyNestedJSONIsRejected(t *testing.T) {
 	depth := 100000
-	doc := `{"contractVersion":"appsec.adapter/v1alpha1",
+	doc := `{"contractVersion":"sulayi.adapter/v1alpha1",
 	  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},"facts":` +
 		strings.Repeat("[", depth) + strings.Repeat("]", depth) + `}`
 	if _, err := parseString(t, doc); err == nil {
@@ -363,12 +363,12 @@ func TestClassifyVersion(t *testing.T) {
 		want VersionSupport
 	}{
 		{ContractVersion, VersionSupported},
-		{"appsec.adapter/v2", VersionUnknown},
-		{"appsec.adapter/", VersionUnparseable},
+		{"sulayi.adapter/v2", VersionUnknown},
+		{"sulayi.adapter/", VersionUnparseable},
 		{"", VersionUnparseable},
 		{"v1alpha1", VersionUnparseable},
 		{"other/v1", VersionUnparseable},
-		{"appsec.adapter/v1 extra", VersionUnparseable},
+		{"sulayi.adapter/v1 extra", VersionUnparseable},
 	}
 	for _, tc := range tests {
 		if got := ClassifyVersion(tc.in); got != tc.want {

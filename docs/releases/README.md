@@ -16,7 +16,7 @@ without invalidating anything here. Adding them now would be release infrastruct
 for an audience that does not yet exist.
 
 Version numbers come from the tag. `go install module@vX.Y.Z` records the version in the
-binary, `appsec version` reports it, and every report embeds it. Nothing needs editing in
+binary, `sulayi version` reports it, and every report embeds it. Nothing needs editing in
 the source to cut a release.
 
 ## Procedure
@@ -32,7 +32,7 @@ make check
 go test ./evals/
 
 # 3. Confirm the version mechanism reports what you expect.
-go build -o /tmp/appsec ./cmd/appsec && /tmp/appsec version
+go build -o /tmp/sulayi ./cmd/sulayi && /tmp/sulayi version
 ```
 
 Then, as the maintainer:
@@ -50,12 +50,12 @@ gh release create v0.1.0 --title "v0.1.0" --notes-file docs/releases/v0.1.0.md
 
 # 7. Verify the published tag installs, from a clean module cache.
 cd "$(mktemp -d)"
-GOBIN="$PWD/bin" go install github.com/jaylordibe/application-security-framework/cmd/appsec@v0.1.0
-./bin/appsec version          # must print v0.1.0, not 0.0.0-dev
+GOBIN="$PWD/bin" go install github.com/jaylordibe/sulayi/cmd/sulayi@v0.1.0
+./bin/sulayi version          # must print v0.1.0, not 0.0.0-dev
 
 # 8. Post-release smoke test against a target you own.
-./bin/appsec doctor
-./bin/appsec scan http://localhost:3000 --spec-url http://localhost:3000/openapi.json
+./bin/sulayi doctor
+./bin/sulayi attack http://localhost:3000 --spec-url http://localhost:3000/openapi.json
 ```
 
 Step 7 is the one that matters: it is the only step that exercises what a new user will

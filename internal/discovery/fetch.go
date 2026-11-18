@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // get performs one discovery request against the target's own origin.

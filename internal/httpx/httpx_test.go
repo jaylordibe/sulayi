@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // loopbackPolicy allows loopback because httptest binds there. The

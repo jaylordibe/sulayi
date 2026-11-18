@@ -1,6 +1,6 @@
 # Security policy
 
-AppSec Framework is security software that deliberately connects to hostile applications,
+Sulayi is security software that deliberately connects to hostile applications,
 stores captured credentials, and executes third-party tools. Its own attack surface is
 treated accordingly: see [docs/security/threat-model.md](docs/security/threat-model.md).
 
@@ -9,21 +9,21 @@ treated accordingly: see [docs/security/threat-model.md](docs/security/threat-mo
 **Do not open a public issue.**
 
 Report privately through GitHub's advisory workflow:
-<https://github.com/jaylordibe/application-security-framework/security/advisories/new>
+<https://github.com/jaylordibe/sulayi/security/advisories/new>
 
-Please include the output of `appsec version` — which reports the build, Go toolchain,
+Please include the output of `sulayi version` — which reports the build, Go toolchain,
 platform and schema versions — a minimal reproduction, and what you believe the impact is. If you cannot use GitHub advisories, open a public issue
 containing **only** a request for a private contact channel and no details.
 
 We aim to acknowledge within 7 days. There is no bug bounty.
 
-## What counts as a vulnerability in AppSec Framework
+## What counts as a vulnerability in Sulayi
 
 These are the classes we consider most serious in our own code:
 
 | Class | Why it is critical |
 |---|---|
-| **Scope escape** | Any way to make AppSec Framework send a request to a host the scope policy did not authorize. This is our highest-severity class: a scanner that contacts the wrong host is an attack tool. Includes DNS rebinding, redirect handling, proxy handling, and address-encoding bypasses. |
+| **Scope escape** | Any way to make Sulayi send a request to a host the scope policy did not authorize. This is our highest-severity class: a scanner that contacts the wrong host is an attack tool. Includes DNS rebinding, redirect handling, proxy handling, and address-encoding bypasses. |
 | **Secret leakage** | A credential, token, cookie or session value reaching a report, a log line, a terminal, or an un-redacted file on disk. |
 | **Execution from untrusted input** | Any path where a target-controlled value (a specification, a response body, an engine's output, a filename) causes code execution, a shell invocation, an arbitrary file read or write, or a path traversal. |
 | **False assurance** | A run that reports success while silently failing to test what it claimed to. A crashed engine, an unreachable target, or an ambiguous outcome being rendered as a pass is a security bug in this project, not a cosmetic one. |
@@ -36,14 +36,14 @@ tool can cause.
 ## Supported versions
 
 Pre-1.0, only the latest release is supported. Output schemas
-(`appsec.report/v1alpha1`, `appsec.run/v1alpha1`, `appsec/v1alpha1`) may change between
+(`sulayi.report/v1alpha1`, `sulayi.run/v1alpha1`, `sulayi/v1alpha1`) may change between
 minor versions; each is versioned so a consumer can detect the change rather than misparse.
 
-## Using AppSec Framework safely
+## Using Sulayi safely
 
 - Assess only what you own or are **explicitly authorized in writing** to test.
 - Prefer disposable environments for anything beyond the `verification` profile.
-- `.appsec/` contains captured HTTP evidence. Redaction runs at capture time, but it is a
+- `.sulayi/` contains captured HTTP evidence. Redaction runs at capture time, but it is a
   mitigation and not a guarantee. Do not commit it; the shipped `.gitignore` excludes it.
 - Treat a report as sensitive: it describes weaknesses in a real system.
 

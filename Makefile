@@ -1,20 +1,20 @@
-# AppSec Framework build and validation.
+# Sulayi build and validation.
 #
 # `make check` is what CI runs and what a contributor should run before opening a
 # pull request. It requires no network, no database and no external engine.
 
 GO      ?= go
-BINARY  := appsec
+BINARY  := sulayi
 DIST    := dist
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
-LDFLAGS := -s -w -X github.com/jaylordibe/application-security-framework/internal/cli.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/jaylordibe/sulayi/internal/cli.Version=$(VERSION)
 
 .DEFAULT_GOAL := check
 
 .PHONY: build
 build: ## Build the binary and the reference adapters into ./dist
 	@mkdir -p $(DIST)
-	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/$(BINARY) ./cmd/appsec
+	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/$(BINARY) ./cmd/sulayi
 	$(GO) build -trimpath -o $(DIST)/$(BINARY)-adapter-laravel ./adapters/laravel
 	$(GO) build -trimpath -o $(DIST)/$(BINARY)-adapter-nestjs ./adapters/nestjs
 

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/resource"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/resource"
 )
 
 // Two boundaries that differ only in the resource must be two ledger rows.
@@ -224,8 +224,8 @@ func (s *stubResourceCheck) executed() []string {
 // without any network.
 func ownershipEngineOptions(t *testing.T, rc ResourceCheck, f resource.Fixture) Options {
 	t.Helper()
-	t.Setenv("APPSEC_STUB_A", "token-a")
-	t.Setenv("APPSEC_STUB_B", "token-b")
+	t.Setenv("SULAYI_STUB_A", "token-a")
+	t.Setenv("SULAYI_STUB_B", "token-b")
 	mk := func(id, env string) identity.Identity {
 		return identity.Identity{ID: id, Auth: identity.Authentication{
 			Scheme: identity.SchemeBearer, Credential: identity.CredentialSource{Env: env},
@@ -234,7 +234,7 @@ func ownershipEngineOptions(t *testing.T, rc ResourceCheck, f resource.Fixture) 
 	// No client is needed: the stub never issues a request, and Resolve only
 	// reads credentials and registers them.
 	ids := identity.Resolve([]identity.Identity{
-		mk("alice", "APPSEC_STUB_A"), mk("bob", "APPSEC_STUB_B"),
+		mk("alice", "SULAYI_STUB_A"), mk("bob", "SULAYI_STUB_B"),
 	}, "http://target.test", nil, redact.New())
 
 	return Options{

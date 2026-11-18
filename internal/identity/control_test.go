@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // clientFor builds a scope-enforced client pointed at a test server, so control
@@ -131,12 +131,12 @@ func TestConcurrentIdentitiesDoNotContaminate(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 8; i++ {
 		name := fmt.Sprintf("id%d", i)
-		t.Setenv("APPSEC_TEST_"+strings.ToUpper(name), name)
+		t.Setenv("SULAYI_TEST_"+strings.ToUpper(name), name)
 		ids = append(ids, Identity{
 			ID: name,
 			Auth: Authentication{
 				Scheme:     SchemeBearer,
-				Credential: CredentialSource{Env: "APPSEC_TEST_" + strings.ToUpper(name)},
+				Credential: CredentialSource{Env: "SULAYI_TEST_" + strings.ToUpper(name)},
 			},
 		})
 	}
@@ -168,11 +168,11 @@ func TestResolveRegistersCredentialsWithTheRedactor(t *testing.T) {
 	defer srv.Close()
 	client, red := clientFor(t, srv)
 
-	const secret = "APPSEC_M1_SECRET_MUST_NEVER_PERSIST_7f91"
-	t.Setenv("APPSEC_TEST_REG", secret)
+	const secret = "SULAYI_M1_SECRET_MUST_NEVER_PERSIST_7f91"
+	t.Setenv("SULAYI_TEST_REG", secret)
 	Resolve([]Identity{{
 		ID:   "admin",
-		Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_TEST_REG"}},
+		Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_REG"}},
 	}}, srv.URL, client, red)
 
 	// The bare value, the on-the-wire form, and a body that echoes either.
@@ -192,12 +192,12 @@ func TestResolveRegistersCustomCredentialHeader(t *testing.T) {
 	defer srv.Close()
 	client, red := clientFor(t, srv)
 
-	t.Setenv("APPSEC_TEST_KEY", "abcdefghijklmnop")
+	t.Setenv("SULAYI_TEST_KEY", "abcdefghijklmnop")
 	Resolve([]Identity{{
 		ID: "svc",
 		Auth: Authentication{
 			Scheme: SchemeAPIKey, Header: "X-Custom-Auth",
-			Credential: CredentialSource{Env: "APPSEC_TEST_KEY"},
+			Credential: CredentialSource{Env: "SULAYI_TEST_KEY"},
 		},
 	}}, srv.URL, client, red)
 
@@ -216,7 +216,7 @@ func TestUnresolvableIdentityIsBlockedNotAnonymous(t *testing.T) {
 
 	set := Resolve([]Identity{{
 		ID:   "admin",
-		Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_DEFINITELY_UNSET"}},
+		Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_DEFINITELY_UNSET"}},
 	}}, srv.URL, client, red)
 
 	c := set.Primary()
@@ -227,7 +227,7 @@ func TestUnresolvableIdentityIsBlockedNotAnonymous(t *testing.T) {
 	if cause != "missing_identity" {
 		t.Errorf("cause = %q, want missing_identity", cause)
 	}
-	if !strings.Contains(why, "APPSEC_DEFINITELY_UNSET") {
+	if !strings.Contains(why, "SULAYI_DEFINITELY_UNSET") {
 		t.Errorf("the reason does not name the credential source: %q", why)
 	}
 	if st := c.Status(); st.Usable {
@@ -244,11 +244,11 @@ func TestLivenessTransitions(t *testing.T) {
 	defer srv.Close()
 	client, red := clientFor(t, srv)
 
-	t.Setenv("APPSEC_TEST_LIVE", "live-token")
+	t.Setenv("SULAYI_TEST_LIVE", "live-token")
 	set := Resolve([]Identity{{
 		ID: "admin",
 		Auth: Authentication{
-			Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_TEST_LIVE"},
+			Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_LIVE"},
 		},
 		Live: Liveness{Path: "/api/me"},
 	}}, srv.URL, client, red)
@@ -305,11 +305,11 @@ func TestTransportFailureDoesNotDeclareTheIdentityDead(t *testing.T) {
 	}))
 	client, red := clientFor(t, srv)
 
-	t.Setenv("APPSEC_TEST_DOWN", "token")
+	t.Setenv("SULAYI_TEST_DOWN", "token")
 	set := Resolve([]Identity{{
 		ID: "admin",
 		Auth: Authentication{
-			Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_TEST_DOWN"},
+			Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_DOWN"},
 		},
 		Live: Liveness{Path: "/api/me"},
 	}}, srv.URL, client, red)
@@ -337,10 +337,10 @@ func TestUnmonitoredIdentityStaysUnknown(t *testing.T) {
 	defer srv.Close()
 	client, red := clientFor(t, srv)
 
-	t.Setenv("APPSEC_TEST_NOCANARY", "token")
+	t.Setenv("SULAYI_TEST_NOCANARY", "token")
 	set := Resolve([]Identity{{
 		ID:   "admin",
-		Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_TEST_NOCANARY"}},
+		Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_NOCANARY"}},
 	}}, srv.URL, client, red)
 	c := set.Primary()
 
@@ -374,11 +374,11 @@ func TestNoteSuspiciousProbesOnce(t *testing.T) {
 	defer srv.Close()
 	client, red := clientFor(t, srv)
 
-	t.Setenv("APPSEC_TEST_BURST", "token")
+	t.Setenv("SULAYI_TEST_BURST", "token")
 	set := Resolve([]Identity{{
 		ID: "admin",
 		Auth: Authentication{
-			Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_TEST_BURST"},
+			Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_BURST"},
 		},
 		Live: Liveness{Path: "/api/me"},
 	}}, srv.URL, client, red)
@@ -412,11 +412,11 @@ func TestProbeRespectsCancellation(t *testing.T) {
 	defer srv.Close()
 	client, red := clientFor(t, srv)
 
-	t.Setenv("APPSEC_TEST_CANCEL", "token")
+	t.Setenv("SULAYI_TEST_CANCEL", "token")
 	set := Resolve([]Identity{{
 		ID: "admin",
 		Auth: Authentication{
-			Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_TEST_CANCEL"},
+			Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_CANCEL"},
 		},
 		Live: Liveness{Path: "/api/me"},
 	}}, srv.URL, client, red)
@@ -438,11 +438,11 @@ func TestSetAccessors(t *testing.T) {
 		t.Error("a nil Set must behave as an empty one; the no-identity path runs through it")
 	}
 
-	t.Setenv("APPSEC_TEST_A", "a-token")
-	t.Setenv("APPSEC_TEST_B", "b-token")
+	t.Setenv("SULAYI_TEST_A", "a-token")
+	t.Setenv("SULAYI_TEST_B", "b-token")
 	set := Resolve([]Identity{
-		{ID: "first", Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_TEST_A"}}},
-		{ID: "second", Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "APPSEC_TEST_B"}}},
+		{ID: "first", Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_A"}}},
+		{ID: "second", Auth: Authentication{Scheme: SchemeBearer, Credential: CredentialSource{Env: "SULAYI_TEST_B"}}},
 	}, srv.URL, client, red)
 
 	if set.Len() != 2 {

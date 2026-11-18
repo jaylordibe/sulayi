@@ -5,12 +5,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // Merging is where adapter facts either earn their place or become a liability.
 //
-// AppSec may learn the same thing from a specification, from an adapter and
+// Sulayi may learn the same thing from a specification, from an adapter and
 // eventually from a request. Those are not interchangeable, and the temptation
 // is to let the most recently processed one win. That would make the oracle
 // depend on the order sources happened to be read in, and it would let a static

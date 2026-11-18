@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // The registry is a fixed list of known engines, and that is the point.
 //
-// AppSec Framework does not let an operator name an arbitrary command with
+// Sulayi does not let an operator name an arbitrary command with
 // arbitrary arguments and an arbitrary environment. That would be a shell runner
 // wearing a security tool's name, and every hardening in this package — the
 // argument vector, the minimal environment, the profile gate, the output
@@ -152,7 +152,7 @@ func (c Collection) Statement() string {
 	s := fmt.Sprintf("%d external engine(s) completed, %d were incomplete, %d were blocked and "+
 		"%d were not enabled. ", completed, partial, blocked, skipped)
 	s += "Every result an external engine reported is recorded as observed and nothing more: " +
-		"AppSec Framework does not promote another tool's alert on that tool's own confidence, " +
+		"Sulayi does not promote another tool's alert on that tool's own confidence, " +
 		"and agreement between two engines is not verification either."
 	if blocked > 0 || partial > 0 {
 		s += " An engine that did not complete assessed nothing, and the classes it covers remain " +

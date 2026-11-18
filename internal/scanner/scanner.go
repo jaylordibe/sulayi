@@ -1,6 +1,6 @@
 // Package scanner runs external scanning engines and normalizes what they find.
 //
-// AppSec Framework does not reimplement Nuclei's template engine, ZAP's active
+// Sulayi does not reimplement Nuclei's template engine, ZAP's active
 // scanner or Semgrep's dataflow analysis. Those are mature, specialised and
 // maintained by people who do nothing else. What this project owns is the part
 // nobody else does: supervising them safely, keeping them inside the
@@ -11,8 +11,8 @@
 // not a finding.** Nuclei saying "critical" is a statement about a template's
 // category. ZAP saying "high confidence" is a statement about ZAP's matcher.
 // Neither is evidence that this application is exploitable, and neither may
-// promote itself. Only AppSec's own deterministic verification can do that, and
-// where AppSec has no verification for a class, `observed` is the honest and
+// promote itself. Only Sulayi's own deterministic verification can do that, and
+// where Sulayi has no verification for a class, `observed` is the honest and
 // final state (ADR-0005).
 package scanner
 
@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/proc"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/proc"
 )
 
 // Budgets. Generous for a real scan, bounded against a hostile or broken tool.
@@ -65,7 +65,7 @@ type Meta struct {
 	Capabilities []Capability
 	// Unlocks describes, for `doctor`, what installing this engine would buy.
 	Unlocks string
-	// InstallHint tells an operator how to get it, without AppSec fetching
+	// InstallHint tells an operator how to get it, without Sulayi fetching
 	// anything itself.
 	InstallHint string
 }
@@ -80,7 +80,7 @@ type Availability struct {
 	Path string
 	// Version is what the tool reported about itself.
 	//
-	// It is the tool's own claim and nothing more. AppSec cannot establish that
+	// It is the tool's own claim and nothing more. Sulayi cannot establish that
 	// a binary named `nuclei` is ProjectDiscovery's Nuclei, and does not
 	// pretend to: see Provenance.
 	Version string
@@ -104,7 +104,7 @@ type Target struct {
 }
 
 // Provenance records what actually ran, so a result can be reproduced and so a
-// report never overstates what AppSec knows about the tool.
+// report never overstates what Sulayi knows about the tool.
 type Provenance struct {
 	// Engine, Version and ExecutablePath describe the program.
 	Engine         string
@@ -118,7 +118,7 @@ type Provenance struct {
 	// were pinned. Without it, a result is not reproducible: the same command
 	// against a corpus that changed overnight is a different scan.
 	RuleSource string
-	// Verified reports whether AppSec could establish that this executable is
+	// Verified reports whether Sulayi could establish that this executable is
 	// what it claims to be. It is false for anything a user installed, and the
 	// report says so rather than implying a provenance chain that does not
 	// exist.
@@ -127,7 +127,7 @@ type Provenance struct {
 
 // Observation is one normalized external result.
 //
-// It is deliberately not called a finding. A finding is something AppSec has an
+// It is deliberately not called a finding. A finding is something Sulayi has an
 // opinion about; this is something another tool said.
 type Observation struct {
 	// RuleID and RuleName identify what fired.
@@ -216,7 +216,7 @@ type Engine interface {
 //
 // It is deliberately not a generic command specification. There is no
 // `command`, no `args` and no `env` an operator can set freely: that would make
-// AppSec a shell runner wearing a security tool's name, and every hardening in
+// Sulayi a shell runner wearing a security tool's name, and every hardening in
 // this package would become optional.
 type Settings struct {
 	// Enabled turns the engine on. Engines are off by default.
@@ -309,11 +309,11 @@ func sanitizeAll(in []string, max int) []string {
 // creates a `.nuclei-config` tree wherever it was started, which for a version
 // probe is the operator's own project directory. A scan is already contained by
 // its workspace; the probe that runs before the scan was not, so an external
-// program was writing into the directory the operator ran `appsec` from.
+// program was writing into the directory the operator ran `sulayi` from.
 //
 // The directory is removed afterwards whatever the probe did.
 func ProbeVersion(ctx context.Context, spec proc.Spec) (proc.Result, error) {
-	dir, err := os.MkdirTemp("", "appsec-probe-")
+	dir, err := os.MkdirTemp("", "sulayi-probe-")
 	if err == nil {
 		defer func() { _ = os.RemoveAll(dir) }()
 		spec.Dir = dir
@@ -327,7 +327,7 @@ func ProbeVersion(ctx context.Context, spec proc.Spec) (proc.Result, error) {
 //
 // The state is not a parameter. Every path into the finding model from an
 // external engine arrives here, and it always produces `observed` — there is no
-// argument that could make it produce anything else. If AppSec later gains
+// argument that could make it produce anything else. If Sulayi later gains
 // deterministic verification for a class, that verification promotes the
 // finding afterwards, from evidence it gathered itself.
 func ToFinding(o Observation, p Provenance, runID string) model.Finding {
@@ -344,7 +344,7 @@ func ToFinding(o Observation, p Provenance, runID string) model.Finding {
 		actual = fmt.Sprintf("%s reported %q at %s", p.Engine, o.RuleID, o.Location)
 	}
 	if o.SourceSeverity != "" {
-		actual += fmt.Sprintf(". %s rates this %s in its own scale, which AppSec Framework has "+
+		actual += fmt.Sprintf(". %s rates this %s in its own scale, which Sulayi has "+
 			"not translated: it is the engine's judgement of the rule, not an assessment of this "+
 			"application's exposure", p.Engine, o.SourceSeverity)
 	}
@@ -363,7 +363,7 @@ func ToFinding(o Observation, p Provenance, runID string) model.Finding {
 		Title:   title,
 		// Observed, always. An external alert is something another tool said.
 		State: model.StateObserved,
-		// AppSec has formed no view, and says so rather than borrowing the
+		// Sulayi has formed no view, and says so rather than borrowing the
 		// engine's scale.
 		Severity:   model.SeverityUnassessed,
 		Confidence: model.ConfidenceLow,
@@ -387,16 +387,16 @@ func ToFinding(o Observation, p Provenance, runID string) model.Finding {
 		Verification: model.VerificationRecord{
 			Strategy:  "external-engine-import",
 			Performed: false,
-			Result: "imported from " + p.Engine + " and not verified by AppSec Framework. It stays " +
+			Result: "imported from " + p.Engine + " and not verified by Sulayi. It stays " +
 				"observed: this project does not promote another tool's alert on that tool's own " +
 				"confidence, and has no deterministic verification for this weakness class",
 			Unavailable: []string{
-				"appsec-verification: AppSec Framework has no deterministic check for this class, " +
+				"sulayi-verification: Sulayi has no deterministic check for this class, " +
 					"so it cannot establish whether the reported condition is exploitable here",
 			},
 		},
 		Remediation: "Triage this against the engine's own documentation for " + o.RuleID +
-			". It has not been confirmed by AppSec Framework.",
+			". It has not been confirmed by Sulayi.",
 	}
 }
 

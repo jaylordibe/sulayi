@@ -25,7 +25,7 @@ import (
 
 	"crypto/sha256"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // File modes. Evidence contains redacted-but-still-sensitive material, so the
@@ -37,7 +37,7 @@ const (
 
 // FormatVersion identifies the on-disk layout. A newer major version is refused
 // rather than misread.
-const FormatVersion = "appsec.run/v1alpha1"
+const FormatVersion = "sulayi.run/v1alpha1"
 
 // Run is one assessment's directory.
 type Run struct {
@@ -76,6 +76,9 @@ func Create(root, runID string, now time.Time) (*Run, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "evidence"), dirMode); err != nil {
 		return nil, fmt.Errorf("store: cannot create evidence directory: %w", err)
 	}
+	if err := ensureIgnored(filepath.Join(root, "runs")); err != nil {
+		return nil, err
+	}
 
 	r := &Run{id: runID, dir: dir, seen: map[string]struct{}{}}
 	meta := Meta{
@@ -90,6 +93,29 @@ func Create(root, runID string, now time.Time) (*Run, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// ensureIgnored makes the runs directory ignore itself in version control.
+//
+// Evidence can contain whatever the target returned, and the repository the
+// operator runs Sulayi from is usually the application's own, whose .gitignore
+// knows nothing about Sulayi. Relying on it would make committing evidence the
+// default. The file goes in runs/, which Sulayi owns, rather than in the output
+// root, which an operator may point at a directory whose .gitignore they own.
+// An existing file is left untouched.
+func ensureIgnored(runsDir string) error {
+	f, err := os.OpenFile(filepath.Join(runsDir, ".gitignore"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, fileMode)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("store: cannot write runs/.gitignore: %w", err)
+	}
+	if _, err := f.WriteString("# Written by Sulayi: run evidence must never be committed.\n*\n"); err != nil {
+		f.Close()
+		return fmt.Errorf("store: cannot write runs/.gitignore: %w", err)
+	}
+	return f.Close()
 }
 
 // Dir returns the run directory.
@@ -166,7 +192,7 @@ func (r *Run) WriteFile(name string, data []byte) error {
 // idempotent, which makes concurrent stores of the same digest safe.
 func (r *Run) PutEvidence(ex model.Exchange) (string, error) {
 	payload, err := json.MarshalIndent(exchangeDoc{
-		SchemaVersion: "appsec.evidence/v1alpha1",
+		SchemaVersion: "sulayi.evidence/v1alpha1",
 		Request: requestDoc{
 			Method:        ex.Request.Method,
 			URL:           ex.Request.URL,

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/outcome"
-	"github.com/jaylordibe/application-security-framework/internal/resource"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/outcome"
+	"github.com/jaylordibe/sulayi/internal/resource"
 )
 
 // A write is confirmed by observing the owner's view of the resource change,

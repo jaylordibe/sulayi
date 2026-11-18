@@ -12,15 +12,15 @@ import (
 // Execute runs the CLI and returns a process exit code.
 func Execute(args []string, stdout, stderr io.Writer) int {
 	root := &cobra.Command{
-		Use:   "appsec",
+		Use:   "sulayi",
 		Short: "Assessment coverage and verification",
-		Long: "AppSec Framework assesses an application you own or are explicitly\n" +
+		Long: "Sulayi assesses an application you own or are explicitly\n" +
 			"authorized to test.\n\n" +
 			"It runs the security engines you already trust, refuses to overstate what\n" +
 			"they found, and produces an account of what was tested, what was blocked,\n" +
 			"what was never attempted, and why. It brings its own authentication and\n" +
 			"cross-owner checks, which contribute to that account rather than replace it.\n\n" +
-			"AppSec Framework does not prove the absence of vulnerabilities. A run\n" +
+			"Sulayi does not prove the absence of vulnerabilities. A run\n" +
 			"with no findings means only that the checks it executed produced none —\n" +
 			"and the report always says how many that was, out of how many it saw.",
 		SilenceUsage:  true,
@@ -31,7 +31,7 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 	root.SetErr(stderr)
 	root.SetArgs(args)
 
-	root.AddCommand(newScanCommand(stdout, stderr))
+	root.AddCommand(newAttackCommand(stdout, stderr))
 	root.AddCommand(newInitCommand(stdout, stderr))
 	root.AddCommand(newDoctorCommand(stdout, stderr))
 	root.AddCommand(newVersionCommand(stdout))
@@ -46,7 +46,7 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 			}
 			return coded.code
 		}
-		fmt.Fprintf(stderr, "appsec: %v\n", err)
+		fmt.Fprintf(stderr, "sulayi: %v\n", err)
 		return ExitUsage
 	}
 	return ExitOK
@@ -62,10 +62,10 @@ type exitError struct {
 func (e *exitError) Error() string { return e.message }
 
 func fail(code int, format string, args ...any) error {
-	return &exitError{code: code, message: fmt.Sprintf("appsec: "+format, args...)}
+	return &exitError{code: code, message: fmt.Sprintf("sulayi: "+format, args...)}
 }
 
-// Main is the entry point used by cmd/appsec.
+// Main is the entry point used by cmd/sulayi.
 func Main() {
 	os.Exit(Execute(os.Args[1:], os.Stdout, os.Stderr))
 }

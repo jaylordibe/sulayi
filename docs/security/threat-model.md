@@ -1,10 +1,10 @@
-# Threat model: AppSec Framework itself
+# Threat model: Sulayi itself
 
 This is security software that will deliberately connect to hostile applications, execute
 third-party scanners, and store captured credentials and personal data. Its own attack
 surface must be treated as seriously as the targets it assesses.
 
-Scope: the `appsec` CLI, its configuration, its adapters and engines, its evidence store
+Scope: the `sulayi` CLI, its configuration, its adapters and engines, its evidence store
 and its reports.
 
 The status of each control is load-bearing, because claiming a control is implemented when
@@ -26,7 +26,7 @@ Nothing here is marked TESTED without a test that fails if the control is remove
 ```
         UNTRUSTED                          |  TRUSTED
 ------------------------------------------ | ---------------------------
- target HTTP responses, headers, bodies    |  appsec.yaml (user-authored)
+ target HTTP responses, headers, bodies    |  sulayi.yaml (user-authored)
  HTML, JavaScript, redirects               |  the operator's intent
  OpenAPI / GraphQL documents               |  the local filesystem we own
  target source repositories                |
@@ -139,8 +139,8 @@ processes. A target-controlled string reaching a shell would be catastrophic.
 **Controls**
 
 - **No shell, ever.** Process execution will use explicit argument vectors
-  (`exec.CommandContext` with `argv`), never a shell string. **DESIGNED** — AppSec
-  Framework currently executes no subprocesses at all, which is why this is not marked implemented.
+  (`exec.CommandContext` with `argv`), never a shell string. **DESIGNED** — Sulayi
+  currently executes no subprocesses at all, which is why this is not marked implemented.
 - YAML decoding is hardened against the non-shell execution paths: the decoder is never
   given `ReferenceFiles` or `ReferenceDirs`, which would let a configuration file pull
   anchor definitions from arbitrary filesystem paths, and input is size-capped because
@@ -160,7 +160,7 @@ Scanner output is parsed by us. A hostile target can influence it (a reflected p
 becomes a finding title). Output may be enormous, malformed, or contain terminal escape
 sequences that rewrite the operator's terminal.
 
-**Controls.** For the untrusted input that AppSec Framework *does* parse today — OpenAPI documents,
+**Controls.** For the untrusted input that Sulayi *does* parse today — OpenAPI documents,
 which for one reference application are fetched from the target itself:
 
 - **External `$ref` is refused outright**, not resolved. A hostile document containing
@@ -238,7 +238,7 @@ The most likely real-world harm from this tool is not a broken scan — it is a 
   (`store.TestRunDirectoryIsOwnerOnly`). On Windows `os.Chmod` only toggles a read-only
   attribute, so the CLI **warns** rather than implying a protection that does not exist.
 - Configuration is not persisted into the run directory, so operator credentials cannot
-  reach it. `.gitignore` excludes `.appsec/`, and `meta.json` warns whoever finds the
+  reach it. `.gitignore` excludes `.sulayi/`, and `meta.json` warns whoever finds the
   directory later. **TESTED** (`store.TestMetaIsWritten`).
 - Un-redacted capture is not available. If it is ever added it must be per-run, explicit,
   and loudly recorded in the report. **PLANNED**.
@@ -387,14 +387,14 @@ most likely to hurt a real user, and the one this project was created to fix.
 
 ### T-16 Operator credentials supplied to authenticate as an identity
 
-M1 introduced the first credentials AppSec Framework holds on the operator's behalf. These
+M1 introduced the first credentials Sulayi holds on the operator's behalf. These
 are worse than the credentials it observes: an observed session cookie belongs to a test
 account created for the run, while a configured credential is one the operator chose to
 hand over, often with real privilege.
 
 **Configuration cannot contain a credential at all.**
 
-- `appsec.yaml` has no field that accepts a credential value. Only a *reference* —
+- `sulayi.yaml` has no field that accepts a credential value. Only a *reference* —
   `credential.env` or `credential.file` — is accepted, and strict decoding rejects anything
   else, so a `token:` key added by a hopeful contributor is a loud parse error rather than a
   committed secret. **TESTED** (`config.TestConfigurationCannotCarryACredentialValue`,
@@ -478,7 +478,7 @@ hand over, often with real privilege.
 
 ### T-17 Resource fixtures, cross-owner probing and mutation
 
-M2 introduced the first requests AppSec Framework builds from operator-supplied
+M2 introduced the first requests Sulayi builds from operator-supplied
 *data* rather than from a specification, and the first requests that deliberately
 change somebody's records. Both are new classes of harm.
 
@@ -577,7 +577,7 @@ recognised as one. Prefer fixtures whose identifiers are opaque row ids.
 
 ### T-18 Framework adapters and the repository they inspect
 
-M3 introduced two new trust boundaries at once: a third-party executable AppSec
+M3 introduced two new trust boundaries at once: a third-party executable Sulayi
 runs, and a source repository it reads. Both are untrusted, and the repository
 should be assumed to be actively hostile — it is, after all, the thing being
 audited.
@@ -666,7 +666,7 @@ audited.
   carries a file and line so a human can check, and a wrong fact yields a
   *suspected* finding somebody reads rather than a confirmed one. It cannot
   produce a confirmed finding on its own: confirmation needs runtime evidence.
-- **An adapter binary is trusted to the extent the operator trusts it.** AppSec
+- **An adapter binary is trusted to the extent the operator trusts it.** Sulayi
   bounds what it can consume and what environment it runs in; it does not
   sandbox the process. An adapter is chosen deliberately, like a compiler.
 - **Adapter binary substitution is not detected.** There is no signature or
@@ -719,7 +719,7 @@ adapters, so there is one implementation of every guarantee rather than three.
 - Version probes run in their own scratch directory, removed afterwards. An engine
   given no `HOME` — which is what "built from nothing" means — falls back to its
   working directory, so a probe with no directory of its own writes into whatever
-  directory the operator ran `appsec` from. **TESTED**
+  directory the operator ran `sulayi` from. **TESTED**
   (`scanner.TestVersionProbeDoesNotRunInTheWorkingDirectory`).
 - A private temporary workspace per run, mode 0700, removed afterwards. ZAP is
   additionally given a private home inside it, so a scan cannot accumulate state
@@ -778,7 +778,7 @@ cannot.**
   unannounced egress and a disclosure of what is being tested.
 - Redirect following is off, so a target cannot redirect a scan off-origin.
 - Cloud upload, the PDCP dashboard and update checks are never enabled.
-- **The honest limit:** AppSec Framework cannot constrain what an individual
+- **The honest limit:** Sulayi cannot constrain what an individual
   Nuclei template or ZAP rule does once the engine is running. A template in the
   supplied corpus can address a host of its own choosing, and ZAP's spider
   reaches what it can find. The mitigations above narrow this; they do not close
@@ -853,7 +853,7 @@ to a report that then reads as green.
   (`evals.TestM4_EngineFailureDoesNotMakeTheReportCleaner`).
 
 **An alert is not a finding.** Every external result enters as `observed` with
-AppSec severity `unassessed`, a value with no rank that cannot satisfy a policy
+Sulayi severity `unassessed`, a value with no rank that cannot satisfy a policy
 threshold. Agreement between two engines is not verification. **TESTED**
 (`scanner.TestExternalAlertsAreOnlyEverObserved`,
 `evals.TestM4_AgreementBetweenEnginesIsNotConfirmation`,
@@ -861,7 +861,7 @@ threshold. Agreement between two engines is not verification. **TESTED**
 
 **Residual risk, stated rather than mitigated.**
 
-- **Executable provenance cannot be established.** AppSec records the resolved
+- **Executable provenance cannot be established.** Sulayi records the resolved
   path and the tool's self-reported version and sets `Verified: false` on every
   run. A binary named `nuclei` on `PATH` may be anything; an attacker who can
   replace it already has the operator's machine. There is no signature check,
@@ -926,7 +926,7 @@ applications answer `/` with a 302 to `/login` and refusing to look would mean
 reading no markup at all on a large class of real targets. That hop is
 re-checked against the target's origin exactly as the first request was, counts
 against the request budget, and drops the query string before re-requesting so a
-redirect cannot carry a credential into a request AppSec made on its own
+redirect cannot carry a credential into a request Sulayi made on its own
 initiative. An off-origin `Location` ends the walk and is recorded. **TESTED**
 (`discovery.TestRedirectsCannotWidenTheAssessment`, both directions).
 
@@ -1065,8 +1065,8 @@ Stated plainly rather than left for a reader to discover.
   that no engine integration exists at all.
 - **`INDETERMINATE` outcomes are reported but not automatically re-tried.**
 - **No signing of release artefacts.** Required before any binary distribution.
-- **A WAF or intermediary in front of the target can produce false negatives.** AppSec
-  Framework fingerprints edge headers and annotates a denial with the possibility that an
+- **A WAF or intermediary in front of the target can produce false negatives.** Sulayi
+  fingerprints edge headers and annotates a denial with the possibility that an
   intermediary, not the application, refused the request — but it cannot yet prove which.
 - **Discovery finds some undocumented surface, never all of it.** Four passive sources and
   five well-known probes reveal what an application happens to publish about itself. A
@@ -1082,8 +1082,8 @@ Stated plainly rather than left for a reader to discover.
   and is not one may be reported. The design accepts noise over invention: every candidate
   is explicitly untested, so a false one costs a line in the ledger rather than a false
   finding.
-- **AppSec Framework is fingerprintable, and therefore cloakable.** Its `User-Agent`, its
-  `__appsec_cb` cache-buster and its `appsec-nonexistent-*` baseline paths are all
+- **Sulayi is fingerprintable, and therefore cloakable.** Its `User-Agent`, its
+  `__sulayi_cb` cache-buster and its `sulayi-nonexistent-*` baseline paths are all
   identifiable, so a hostile target can serve a denial to the scanner and real data to
   everyone else. Being identifiable is deliberate — an assessment tool that disguises itself is
   harder to authorize and harder to stop — so this is accepted rather than fixed by

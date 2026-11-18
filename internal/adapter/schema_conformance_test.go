@@ -15,7 +15,7 @@ import (
 
 func compileSchema(t *testing.T) *jsonschema.Schema {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "appsec.adapter.schema.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "sulayi.adapter.schema.json"))
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
@@ -24,10 +24,10 @@ func compileSchema(t *testing.T) *jsonschema.Schema {
 		t.Fatalf("schema is not valid JSON: %v", err)
 	}
 	c := jsonschema.NewCompiler()
-	if err := c.AddResource("https://appsec.local/adapter.json", doc); err != nil {
+	if err := c.AddResource("https://sulayi.local/adapter.json", doc); err != nil {
 		t.Fatalf("add schema: %v", err)
 	}
-	s, err := c.Compile("https://appsec.local/adapter.json")
+	s, err := c.Compile("https://sulayi.local/adapter.json")
 	if err != nil {
 		t.Fatalf("compile schema: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestSchemaAcceptsWhatTheParserAccepts(t *testing.T) {
 	docs := map[string]string{
 		"minimal": minimalValid,
 		"full": `{
-		  "contractVersion": "appsec.adapter/v1alpha1",
+		  "contractVersion": "sulayi.adapter/v1alpha1",
 		  "adapter": {"name": "laravel", "version": "0.1.0", "extractionMethod": "static-lexical"},
 		  "target": {"framework": "laravel", "frameworkVersion": "12.x"},
 		  "facts": [
@@ -65,7 +65,7 @@ func TestSchemaAcceptsWhatTheParserAccepts(t *testing.T) {
 		  "limitations": ["dynamic middleware is not resolved"]
 		}`,
 		"framework native": `{
-		  "contractVersion": "appsec.adapter/v1alpha1",
+		  "contractVersion": "sulayi.adapter/v1alpha1",
 		  "adapter": {"name": "x", "version": "1", "extractionMethod": "framework-native"},
 		  "facts": []
 		}`,
@@ -87,16 +87,16 @@ func TestSchemaAcceptsWhatTheParserAccepts(t *testing.T) {
 func TestSchemaAndParserAgreeOnRejection(t *testing.T) {
 	schema := compileSchema(t)
 	docs := map[string]string{
-		"unknown contract version": `{"contractVersion":"appsec.adapter/v9",
+		"unknown contract version": `{"contractVersion":"sulayi.adapter/v9",
 		  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},"facts":[]}`,
-		"unknown top-level field": `{"contractVersion":"appsec.adapter/v1alpha1",
+		"unknown top-level field": `{"contractVersion":"sulayi.adapter/v1alpha1",
 		  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},
 		  "facts":[],"trustMe":true}`,
-		"unknown extraction method": `{"contractVersion":"appsec.adapter/v1alpha1",
+		"unknown extraction method": `{"contractVersion":"sulayi.adapter/v1alpha1",
 		  "adapter":{"name":"x","version":"1","extractionMethod":"vibes"},"facts":[]}`,
-		"adapter name is not a slug": `{"contractVersion":"appsec.adapter/v1alpha1",
+		"adapter name is not a slug": `{"contractVersion":"sulayi.adapter/v1alpha1",
 		  "adapter":{"name":"../../etc","version":"1","extractionMethod":"static-lexical"},"facts":[]}`,
-		"missing adapter": `{"contractVersion":"appsec.adapter/v1alpha1","facts":[]}`,
+		"missing adapter": `{"contractVersion":"sulayi.adapter/v1alpha1","facts":[]}`,
 	}
 	for name, doc := range docs {
 		t.Run(name, func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestSchemaRejectsMalformedFacts(t *testing.T) {
 	}
 	for name, fact := range docs {
 		t.Run(name, func(t *testing.T) {
-			doc := `{"contractVersion":"appsec.adapter/v1alpha1",
+			doc := `{"contractVersion":"sulayi.adapter/v1alpha1",
 			  "adapter":{"name":"x","version":"1","extractionMethod":"static-lexical"},
 			  "facts":[` + fact + `]}`
 			if err := validateAgainstSchema(t, schema, doc); err == nil {
@@ -143,7 +143,7 @@ func TestSchemaRejectsMalformedFacts(t *testing.T) {
 // property that makes provenance spoofing require lying about the method
 // instead — which at least appears in the report.
 func TestSchemaHasNoProvenanceField(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "appsec.adapter.schema.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "sulayi.adapter.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

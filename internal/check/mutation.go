@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // mutationResult describes whether a write landed, judged from the owner's own

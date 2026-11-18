@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/jaylordibe/application-security-framework/schemas/appsec.config.schema.json",
-  "title": "AppSec Framework configuration (appsec.yaml)",
-  "description": "Configuration for the appsec CLI. The Go parser is the runtime authority; this schema exists for editor completion and CI validation, and a conformance test asserts the two agree on a corpus of valid and invalid documents.",
+  "$id": "https://github.com/jaylordibe/sulayi/schemas/sulayi.config.schema.json",
+  "title": "Sulayi configuration (sulayi.yaml)",
+  "description": "Configuration for the sulayi CLI. The Go parser is the runtime authority; this schema exists for editor completion and CI validation, and a conformance test asserts the two agree on a corpus of valid and invalid documents.",
   "type": "object",
   "required": [
     "target"
@@ -11,7 +11,7 @@
   "properties": {
     "apiVersion": {
       "type": "string",
-      "const": "appsec/v1alpha1",
+      "const": "sulayi/v1alpha1",
       "description": "Configuration contract version. Required from the first release so that adding it later cannot invalidate existing files."
     },
     "target": {
@@ -122,7 +122,7 @@
     },
     "identities": {
       "type": "array",
-      "description": "Security principals AppSec Framework may act as. A credential is never written here: only a reference to an environment variable or a file. M1 uses the first identity as the authenticated control; choosing between identities is an M2 concern.",
+      "description": "Security principals Sulayi may act as. A credential is never written here: only a reference to an environment variable or a file. M1 uses the first identity as the authenticated control; choosing between identities is an M2 concern.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -376,7 +376,7 @@
     "engines": {
       "type": "object",
       "additionalProperties": false,
-      "description": "External scanning engines. Each is a known integration, not a command you compose: there is deliberately no command, args or env field, because those would make AppSec Framework a general process runner and turn its argument-vector construction, minimal environment and profile gating into things a configuration file could opt out of. An engine's results are recorded as observed and are never promoted to confirmed on the engine's own confidence.",
+      "description": "External scanning engines. Each is a known integration, not a command you compose: there is deliberately no command, args or env field, because those would make Sulayi a general process runner and turn its argument-vector construction, minimal environment and profile gating into things a configuration file could opt out of. An engine's results are recorded as observed and are never promoted to confirmed on the engine's own confidence.",
       "properties": {
         "sourceRoot": {
           "type": "string",
@@ -385,7 +385,7 @@
         "nuclei": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Nuclei. Templates are executable security logic and must be supplied locally: AppSec Framework will not let Nuclei fetch its own, because a corpus that changed overnight makes results incomparable. Unsigned templates, code templates, headless browsing, redirect following, cloud upload and out-of-band interaction are all disabled.",
+          "description": "Nuclei. Templates are executable security logic and must be supplied locally: Sulayi will not let Nuclei fetch its own, because a corpus that changed overnight makes results incomparable. Unsigned templates, code templates, headless browsing, redirect following, cloud upload and out-of-band interaction are all disabled.",
           "properties": {
             "enabled": {
               "type": "boolean",
@@ -434,7 +434,7 @@
         "zap": {
           "type": "object",
           "additionalProperties": false,
-          "description": "ZAP, run one-shot rather than as a daemon, with a private home inside the run's workspace. It runs unauthenticated: AppSec Framework does not hand identity credentials to a third-party engine.",
+          "description": "ZAP, run one-shot rather than as a daemon, with a private home inside the run's workspace. It runs unauthenticated: Sulayi does not hand identity credentials to a third-party engine.",
           "properties": {
             "enabled": {
               "type": "boolean",
@@ -510,7 +510,7 @@
             },
             "rules": {
               "type": "string",
-              "description": "Local rule file or directory. Required when sast is enabled. AppSec Framework ships no rules."
+              "description": "Local rule file or directory. Required when sast is enabled. Sulayi ships no rules."
             }
           }
         }
@@ -640,7 +640,7 @@
     "environment": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Stated deviations from production, recorded as facts. AppSec Framework does not compute a fidelity score.",
+      "description": "Stated deviations from production, recorded as facts. Sulayi does not compute a fidelity score.",
       "properties": {
         "name": {
           "type": "string"
@@ -656,7 +656,7 @@
     "policy": {
       "type": "object",
       "additionalProperties": false,
-      "description": "When a run fails the build. Severity thresholds; empty disables a rule. Suspected findings count by default, because AppSec Framework cannot reach 'confirmed' without credentials and gating only on confirmed findings would exit 0 on a real bypass.",
+      "description": "When a run fails the build. Severity thresholds; empty disables a rule. Suspected findings count by default, because Sulayi cannot reach 'confirmed' without credentials and gating only on confirmed findings would exit 0 on a real bypass.",
       "properties": {
         "failOnConfirmed": {
           "enum": [

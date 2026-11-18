@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jaylordibe/application-security-framework/adapters/internal/source"
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
+	"github.com/jaylordibe/sulayi/adapters/internal/source"
+	"github.com/jaylordibe/sulayi/internal/adapter"
 )
 
 // run executes the adapter end to end against a source root, exactly as the

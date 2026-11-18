@@ -1,7 +1,7 @@
 // M1 evaluation fixtures: identities and the authenticated control request.
 //
 // Each fixture is a deterministic in-process application exhibiting one
-// behaviour a real target exhibits, paired with the verdict AppSec Framework
+// behaviour a real target exhibits, paired with the verdict Sulayi
 // must reach. The pairing is the point: a check that confirms the vulnerable
 // fixture but also confirms the misleading one has not learned anything, it has
 // merely become louder.
@@ -19,16 +19,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/report"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
-	"github.com/jaylordibe/application-security-framework/internal/store"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/report"
+	"github.com/jaylordibe/sulayi/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/store"
 )
 
 // theProtectedOperation is the operation every fixture below disagrees about.
@@ -36,7 +36,7 @@ const theProtectedOperation = "GET /api/profile"
 
 // evalToken is the credential the fixtures authenticate with. It is distinctive
 // so that the leakage fixture can search for it unambiguously.
-const evalToken = "APPSEC_M1_SECRET_MUST_NEVER_PERSIST_7f91a2c4d8e6b0f3"
+const evalToken = "SULAYI_M1_SECRET_MUST_NEVER_PERSIST_7f91a2c4d8e6b0f3"
 
 // identityOptions describes the identity a fixture configures.
 type identityOptions struct {
@@ -69,7 +69,7 @@ func runWithIdentity(t *testing.T, handler http.Handler, opt identityOptions) (e
 	}
 	t.Cleanup(client.Close)
 
-	const envName = "APPSEC_EVAL_TOKEN"
+	const envName = "SULAYI_EVAL_TOKEN"
 	if opt.unset {
 		t.Setenv(envName, "")
 		os.Unsetenv(envName)
@@ -347,7 +347,7 @@ func TestM1_MissingCredentialIsExplicitAndNeverAPass(t *testing.T) {
 	if row.Cause != model.CauseMissingIdentity {
 		t.Errorf("cause = %s, want missing_identity", row.Cause)
 	}
-	if !strings.Contains(row.Detail, "APPSEC_EVAL_TOKEN") {
+	if !strings.Contains(row.Detail, "SULAYI_EVAL_TOKEN") {
 		t.Errorf("the ledger does not say which credential source was empty: %q", row.Detail)
 	}
 }
@@ -656,7 +656,7 @@ func runWithIdentityAndSink(
 	}
 	t.Cleanup(client.Close)
 
-	const envName = "APPSEC_EVAL_TOKEN"
+	const envName = "SULAYI_EVAL_TOKEN"
 	t.Setenv(envName, evalToken)
 	id := identity.Identity{
 		ID:   "admin",

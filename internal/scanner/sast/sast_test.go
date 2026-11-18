@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // A Semgrep/opengrep --json document.
@@ -82,8 +82,8 @@ func TestStaticFindingsAreNotRuntimeProof(t *testing.T) {
 // Registry rule identifiers would fetch over the network and, for Semgrep, turn
 // telemetry on. Only local paths are accepted.
 func TestRegistryRuleSourcesAreRefused(t *testing.T) {
-	for _, rules := range []string{ // appsec:refuses-registry
-		"p/default", "r/go", "auto", "https://example.test/rules.yaml", // appsec:refuses-registry
+	for _, rules := range []string{ // sulayi:refuses-registry
+		"p/default", "r/go", "auto", "https://example.test/rules.yaml", // sulayi:refuses-registry
 	} {
 		_, err := Engine{}.Invocation(
 			scanner.Target{SourceRoot: t.TempDir(), Profile: model.ProfileVerification},

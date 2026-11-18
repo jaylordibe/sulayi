@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/jaylordibe/application-security-framework/schemas/appsec.adapter.schema.json",
-  "title": "AppSec Framework adapter contract (appsec.adapter/v1alpha1)",
+  "$id": "https://github.com/jaylordibe/sulayi/schemas/sulayi.adapter.schema.json",
+  "title": "Sulayi adapter contract (sulayi.adapter/v1alpha1)",
   "description": "The document a framework adapter writes to stdout. The Go core is the runtime authority and validates more than this schema can express \u2014 duplicate and contradictory facts, path safety, string sanitisation and size budgets. This schema exists so an adapter author in any language can validate output without reading Go, and a conformance test asserts the two agree.",
   "type": "object",
   "additionalProperties": false,
@@ -12,7 +12,7 @@
   ],
   "properties": {
     "contractVersion": {
-      "const": "appsec.adapter/v1alpha1",
+      "const": "sulayi.adapter/v1alpha1",
       "description": "The contract version, not the adapter's version. A version this build does not know is refused rather than interpreted, because a later contract may give an existing field a different meaning."
     },
     "adapter": {

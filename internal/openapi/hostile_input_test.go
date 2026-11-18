@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // A YAML alias bomb: a few hundred bytes that expand to hundreds of millions of

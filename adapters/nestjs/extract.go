@@ -1,4 +1,4 @@
-// Command appsec-adapter-nestjs reports normalized security facts about a
+// Command sulayi-adapter-nestjs reports normalized security facts about a
 // NestJS application.
 //
 // Like the Laravel adapter, it reads source and never executes it, and for a
@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/adapters/internal/source"
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
+	"github.com/jaylordibe/sulayi/adapters/internal/source"
+	"github.com/jaylordibe/sulayi/internal/adapter"
 )
 
 // NestJS security semantics, which exist here and nowhere in the core.

@@ -10,12 +10,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jaylordibe/application-security-framework/internal/config"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/nuclei"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/sast"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/zap"
-	"github.com/jaylordibe/application-security-framework/internal/store"
+	"github.com/jaylordibe/sulayi/internal/config"
+	"github.com/jaylordibe/sulayi/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/scanner/nuclei"
+	"github.com/jaylordibe/sulayi/internal/scanner/sast"
+	"github.com/jaylordibe/sulayi/internal/scanner/zap"
+	"github.com/jaylordibe/sulayi/internal/store"
 )
 
 // engineTool describes an optional external engine.
@@ -35,7 +35,7 @@ func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
 		Use:   "doctor",
 		Short: "Report what is available and what each missing piece would unlock",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintf(stdout, "appsec %s (%s/%s, %s)\n\n",
+			fmt.Fprintf(stdout, "sulayi %s (%s/%s, %s)\n\n",
 				resolveVersion(), runtime.GOOS, runtime.GOARCH, runtime.Version())
 
 			fmt.Fprintln(stdout, "Core")
@@ -64,13 +64,13 @@ func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
 				fmt.Fprintf(stdout, "  %-22s %-10s %s\n", tools[i].name, tools[i].status, tools[i].unlocks)
 			}
 
-			fmt.Fprintln(stdout, "\nNote: AppSec Framework never downloads or installs an engine, and this command\n"+
+			fmt.Fprintln(stdout, "\nNote: Sulayi never downloads or installs an engine, and this command\n"+
 				"changes nothing on this machine. An engine that is absent is reported as blocked\n"+
 				"during a scan, never as a clean result.")
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to appsec.yaml (default: ./appsec.yaml if present)")
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to sulayi.yaml (default: ./sulayi.yaml if present)")
 	return cmd
 }
 
@@ -87,10 +87,10 @@ func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
 func reportIdentities(stdout io.Writer, configPath string) {
 	path := configPath
 	if path == "" {
-		if _, err := os.Stat("appsec.yaml"); err != nil {
+		if _, err := os.Stat("sulayi.yaml"); err != nil {
 			return
 		}
-		path = "appsec.yaml"
+		path = "sulayi.yaml"
 	}
 
 	fmt.Fprintln(stdout, "\nIdentities (from "+path+")")
@@ -170,10 +170,10 @@ func reportEngines(ctx context.Context, stdout io.Writer, configPath string) {
 func loadConfigIfPresent(configPath string) (config.Config, error) {
 	path := configPath
 	if path == "" {
-		if _, err := os.Stat("appsec.yaml"); err != nil {
+		if _, err := os.Stat("sulayi.yaml"); err != nil {
 			return config.Config{}, err
 		}
-		path = "appsec.yaml"
+		path = "sulayi.yaml"
 	}
 	return config.Load(path)
 }

@@ -24,9 +24,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/proc"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/proc"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // launcherEnvNames is the entire environment ZAP is given.
@@ -44,8 +44,12 @@ const binaryName = "zap.sh"
 type Mode string
 
 const (
-	// ModePassive spiders the target and reports what passive rules observe.
-	// It sends ordinary requests and does not attempt attacks.
+	// ModePassive is intended to spider the target and report what passive
+	// rules observe. That it sends no attack payloads is NOT established: it
+	// relies on -quickprogress, which ZAP's Quick Start documentation describes
+	// only as showing progress bars, and no -quick* option disables the active
+	// scanner. Until passivity is proven against a real ZAP, it is gated like
+	// active mode.
 	ModePassive Mode = "passive"
 	// ModeActive additionally runs ZAP's active scanner, which sends attack
 	// payloads. It is an attack, and it is gated accordingly.
@@ -67,10 +71,10 @@ func (Engine) Meta() scanner.Meta {
 			"CWE-79 cross-site scripting",
 			"CWE-89 SQL injection",
 		},
-		Unlocks: "runtime web scanning: injection and cross-site scripting classes AppSec " +
-			"Framework does not test natively",
+		Unlocks: "runtime web scanning: injection and cross-site scripting classes Sulayi " +
+			"does not test natively",
 		InstallHint: "Install ZAP from https://www.zaproxy.org/download/ and point " +
-			"engines.zap.executable at zap.sh. AppSec Framework never downloads or installs an engine.",
+			"engines.zap.executable at zap.sh. Sulayi never downloads or installs an engine.",
 	}
 }
 
@@ -85,19 +89,17 @@ func mode(s scanner.Settings) Mode {
 	return ModePassive
 }
 
-// RequiredProfile gates ZAP by what it is actually configured to do.
+// RequiredProfile gates ZAP at intrusive in every mode.
 //
-// This is the distinction §21 of the milestone turns on: a passive scan is
-// ordinary traffic and belongs at verification, while the active scanner sends
-// payloads intended to change behaviour and belongs at intrusive. Letting an
-// active scan run under a reconnaissance profile because the same executable
-// covers both would be exactly the silent escalation the profile model exists
-// to prevent.
-func (Engine) RequiredProfile(s scanner.Settings) model.Profile {
-	if mode(s) == ModeActive {
-		return model.ProfileIntrusive
-	}
-	return model.ProfileVerification
+// A passive scan would belong at verification, but this integration cannot yet
+// show that its passive mode is passive (see ModePassive). Gating a mode by what
+// it is meant to do rather than what it is shown to do is the silent escalation
+// the profile model exists to prevent, so ZAP stays off at the default profile
+// and runs only when the operator has authorized intrusive testing. Restoring
+// verification for passive mode requires driving ZAP through a plan that
+// provably contains no active-scan job.
+func (Engine) RequiredProfile(scanner.Settings) model.Profile {
+	return model.ProfileIntrusive
 }
 
 // Detect resolves the executable and asks it for its version.
@@ -139,7 +141,7 @@ func (Engine) Detect(ctx context.Context, s scanner.Settings) scanner.Availabili
 	return scanner.Availability{
 		Present: true, Path: path, Version: version,
 		Warnings: []string{
-			"the ZAP executable is whatever is installed at " + path + "; AppSec Framework " +
+			"the ZAP executable is whatever is installed at " + path + "; Sulayi " +
 				"records its path and self-reported version but cannot establish its provenance",
 		},
 	}
@@ -239,8 +241,9 @@ func (Engine) Invocation(
 		"-quickout", w.OutputPath,
 	}
 	if mode(s) == ModePassive {
-		// Spider and passive-scan only. Without this, -quickurl runs the active
-		// scanner, which sends attack payloads.
+		// Intended to limit the run to spidering and passive rules. ZAP's
+		// documentation describes -quickprogress only as showing progress bars,
+		// so this is not relied on as a safety control; RequiredProfile is.
 		args = append(args, "-quickprogress")
 	}
 
@@ -254,7 +257,7 @@ func (Engine) Invocation(
 			Engine:         "zap",
 			Version:        a.Version,
 			ExecutablePath: a.Path,
-			RuleSource: fmt.Sprintf("ZAP's built-in rules in %s mode; AppSec Framework supplies "+
+			RuleSource: fmt.Sprintf("ZAP's built-in rules in %s mode; Sulayi supplies "+
 				"no rules and does not pin ZAP's add-ons, so results depend on the installed "+
 				"version and its add-on state", mode(s)),
 			Verified: false,
@@ -289,9 +292,9 @@ type report struct {
 
 // riskName maps ZAP's numeric risk code to its own label.
 //
-// This is not a translation into AppSec's scale — it is ZAP's own vocabulary,
+// This is not a translation into Sulayi's scale — it is ZAP's own vocabulary,
 // which the report happens to encode as a number. "3" and "High" are the same
-// statement by ZAP; neither is a statement by AppSec Framework.
+// statement by ZAP; neither is a statement by Sulayi.
 func riskName(code string) string {
 	switch strings.TrimSpace(code) {
 	case "3":
@@ -369,7 +372,7 @@ func (Engine) Normalize(
 					Location:  firstNonEmpty(inst.URI, site.Name),
 					Parameter: inst.Param,
 					// ZAP's own risk and confidence, verbatim. ZAP's four risks
-					// and five confidences do not map onto AppSec's scales and
+					// and five confidences do not map onto Sulayi's scales and
 					// are not converted (ADR-0005).
 					SourceSeverity:   riskName(a.RiskCode),
 					SourceConfidence: confidenceName(a.Confidence),
@@ -392,12 +395,12 @@ func (Engine) Normalize(
 		out.Covered = Engine{}.Meta().Capabilities
 	}
 	out.Limitations = []string{
-		"ZAP's spider reaches what it can find from the target URL. AppSec Framework cannot " +
+		"ZAP's spider reaches what it can find from the target URL. Sulayi cannot " +
 			"constrain where a ZAP rule sends a request, so its traffic is bounded by ZAP's own " +
 			"configuration rather than by this tool's authorization boundary",
-		"ZAP results depend on the installed version and its add-on state, which AppSec " +
-			"Framework does not pin; two runs against different installations are not comparable",
-		"ZAP runs unauthenticated. AppSec Framework does not pass identity credentials to a " +
+		"ZAP results depend on the installed version and its add-on state, which Sulayi " +
+			"does not pin; two runs against different installations are not comparable",
+		"ZAP runs unauthenticated. Sulayi does not pass identity credentials to a " +
 			"third-party engine, so anything reachable only when signed in was not scanned",
 	}
 	if mode(s) == ModePassive {

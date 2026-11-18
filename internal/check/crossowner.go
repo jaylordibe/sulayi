@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/outcome"
-	"github.com/jaylordibe/application-security-framework/internal/resource"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/outcome"
+	"github.com/jaylordibe/sulayi/internal/resource"
 )
 
 // CrossOwnerReadID identifies the cross-owner read check.

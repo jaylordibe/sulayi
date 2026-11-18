@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // Signals are the application-specific hints an operator supplies.

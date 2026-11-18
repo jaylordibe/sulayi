@@ -1,8 +1,8 @@
-# Application Security Framework
+# Sulayi
 
 **An assessment-coverage and verification layer.**
 
-AppSec Framework runs the security engines you already trust, refuses to overstate what
+Sulayi runs the security engines you already trust, refuses to overstate what
 they found, and produces a defensible account of what was tested, what was blocked, what
 was never attempted, and why.
 
@@ -15,7 +15,7 @@ On a real application it reports things like *10 of 84 operations executed* — 
 machine-readable cause for each of the other 74. A scan that exercised a tenth of the
 surface and found nothing is not a clean result, and saying so is the product.
 
-> **AppSec Framework does not prove that an application is secure.** A run with no
+> **Sulayi does not prove that an application is secure.** A run with no
 > findings means only that the checks it executed, against the operations it could see,
 > produced none. Every report states what was not tested and why.
 
@@ -33,7 +33,7 @@ the source-analysis integration accepts either binary and only opengrep has been
 treat Semgrep support as untested code
 ([details](docs/engines/README.md#validation-status)). Both reference applications are
 assessed while running in CI. Schemas may change before 1.0. See
-[What AppSec Framework does not do yet](#what-appsec-framework-does-not-do-yet) before
+[What Sulayi does not do yet](#what-sulayi-does-not-do-yet) before
 relying on it. It has not been evaluated for precision or recall against a corpus of real
 applications, so no detection-quality claim is made.
 
@@ -43,13 +43,13 @@ applications, so no detection-quality claim is made.
 
 | | |
 |---|---|
-| Product name | Application Security Framework |
-| Short name | AppSec Framework |
-| Repository | `application-security-framework` |
-| CLI executable | `appsec` |
-| Configuration file | `appsec.yaml` |
-| Runtime state directory | `.appsec/` |
-| Machine-readable tool id | `application-security-framework` |
+| Product name | Sulayi |
+| Repository | `sulayi` |
+| CLI executable | `sulayi` |
+| Assessment command | `sulayi attack` |
+| Configuration file | `sulayi.yaml` |
+| Runtime state directory | `.sulayi/` |
+| Machine-readable tool id | `sulayi` |
 
 ---
 
@@ -64,16 +64,16 @@ Neither scan can detect a broken ownership or tenant boundary — not because ZA
 deficient, but because a single-identity scan cannot express a cross-identity
 expectation. **Nothing in either report says so.** The pipeline looks green.
 
-AppSec Framework is built around the two things that make that possible:
+Sulayi is built around the two things that make that possible:
 
 1. **The oracle** — deciding whether a response is a vulnerability requires knowing what
-   *should* have happened. AppSec Framework derives that expectation from the
+   *should* have happened. Sulayi derives that expectation from the
    application's own artefacts, and grades how much the derivation can be trusted.
 2. **The ledger** — every unit of intended work carries a disposition: executed, blocked
    with a machine-readable cause, or untested with a reason. Coverage accounting is
    [absent from every open-source tool we surveyed](docs/research/ecosystem.md).
 
-What AppSec Framework deliberately does **not** claim: novelty for multi-identity
+What Sulayi deliberately does **not** claim: novelty for multi-identity
 authorization testing. [`praetorian-inc/hadrian`](https://github.com/praetorian-inc/hadrian)
 ships that, in Go, under Apache-2.0. Our reasoning is in
 [ADR-0003](docs/adr/0003-differentiator-oracle-and-coverage.md).
@@ -86,30 +86,30 @@ Requires Go 1.27 or newer.
 
 ```bash
 # The latest published release.
-go install github.com/jaylordibe/application-security-framework/cmd/appsec@latest
+go install github.com/jaylordibe/sulayi/cmd/sulayi@latest
 
 # A specific release, which is what to pin in CI.
-go install github.com/jaylordibe/application-security-framework/cmd/appsec@v0.1.0
+go install github.com/jaylordibe/sulayi/cmd/sulayi@v0.1.0
 
 # The development branch, which may be ahead of any release.
-go install github.com/jaylordibe/application-security-framework/cmd/appsec@main
+go install github.com/jaylordibe/sulayi/cmd/sulayi@main
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/jaylordibe/application-security-framework
-cd application-security-framework
-make build      # produces ./dist/appsec
+git clone https://github.com/jaylordibe/sulayi
+cd sulayi
+make build      # produces ./dist/sulayi
 ```
 
 Check what you installed:
 
 ```bash
-appsec version
+sulayi version
 ```
 
-AppSec Framework is a single static binary. No runtime, no database, no account, no cloud
+Sulayi is a single static binary. No runtime, no database, no account, no cloud
 service.
 
 **Platforms.** Built and tested by CI on Linux, macOS and Windows (`go test` and
@@ -121,17 +121,17 @@ on Linux only, so behaviour with external engines is best evidenced there.
 ## Use
 
 ```bash
-appsec scan http://localhost:3000
+sulayi attack http://localhost:3000
 ```
 
-The URL you pass **is the authorization you are granting**: AppSec Framework contacts that
-origin and nothing else unless you widen the scope in `appsec.yaml`.
+The URL you pass **is the authorization you are granting**: Sulayi contacts that
+origin and nothing else unless you widen the scope in `sulayi.yaml`.
 
 ```bash
-appsec init      # write a commented appsec.yaml
-appsec doctor    # what is installed, and what each missing piece would unlock
-appsec scan http://localhost:3000 --spec ./openapi.json
-appsec scan https://staging.example.com --spec-url https://staging.example.com/openapi.json
+sulayi init      # write a commented sulayi.yaml
+sulayi doctor    # what is installed, and what each missing piece would unlock
+sulayi attack http://localhost:3000 --spec ./openapi.json
+sulayi attack https://staging.example.com --spec-url https://staging.example.com/openapi.json
 ```
 
 ### External engines
@@ -144,7 +144,7 @@ engines:
     templates: ./nuclei-templates    # required; nothing is downloaded
 ```
 
-AppSec Framework does not reimplement Nuclei's templates, ZAP's active scanner or
+Sulayi does not reimplement Nuclei's templates, ZAP's active scanner or
 Semgrep's dataflow analysis. It supervises them: explicit argument vectors and never a
 shell, an environment built from nothing so your bearer tokens cannot reach a third-party
 process, process groups so a killed engine cannot leave a JVM or a browser running, and
@@ -152,7 +152,7 @@ budgets on time and output.
 
 **An engine result is an observation, not a finding.** Nuclei saying `critical` is Nuclei's
 opinion of its own template; it is not evidence that your application is exploitable. Every
-imported result is `observed`, AppSec's own severity is `unassessed`, and nothing an engine
+imported result is `observed`, Sulayi's own severity is `unassessed`, and nothing an engine
 reports can fail your build on its own. Two engines agreeing is not verification either.
 
 **A failed engine makes the report less confident, not quieter.** Missing, crashed, hung,
@@ -160,7 +160,7 @@ flooding or timed-out — each becomes a blocked ledger row saying which classes
 therefore still unassessed. An engine that did not complete assesses nothing, and a passive
 ZAP scan does not claim the injection classes its active scanner would have tested.
 
-`appsec doctor` reports which engines are installed, what each would unlock, and changes
+`sulayi doctor` reports which engines are installed, what each would unlock, and changes
 nothing on your machine.
 
 ### Framework adapters
@@ -170,7 +170,7 @@ adapters:
   sourceRoot: ../my-application
   use:
     - name: laravel
-      path: ./dist/appsec-adapter-laravel
+      path: ./dist/sulayi-adapter-laravel
 ```
 
 The shipped adapters read your source and **execute nothing** — no `artisan`, no module
@@ -195,7 +195,7 @@ identities:
     authentication:
       type: bearer                      # or apiKey, with a header
       credential:
-        env: APPSEC_ADMIN_TOKEN         # or: file: /run/secrets/admin-token
+        env: SULAYI_ADMIN_TOKEN         # or: file: /run/secrets/admin-token
     liveness:                           # optional, strongly recommended
       method: GET
       path: /api/me
@@ -203,10 +203,10 @@ identities:
 ```
 
 ```bash
-APPSEC_ADMIN_TOKEN='...' appsec scan http://localhost:3000
+SULAYI_ADMIN_TOKEN='...' sulayi attack http://localhost:3000
 ```
 
-**A credential is never written into `appsec.yaml`.** The file has no field that accepts
+**A credential is never written into `sulayi.yaml`.** The file has no field that accepts
 one — only a reference to an environment variable or a file — so it stays safe to commit
 and safe to review. There is no `--token` flag either: process listings are readable by
 other users and shell history outlives the run.
@@ -226,12 +226,12 @@ identities:
     authentication:
       type: bearer
       credential:
-        env: APPSEC_ALICE_TOKEN
+        env: SULAYI_ALICE_TOKEN
   - id: bob                           # the non-owner; a second identity is required
     authentication:
       type: bearer
       credential:
-        env: APPSEC_BOB_TOKEN
+        env: SULAYI_BOB_TOKEN
 
 resources:
   - id: order-alice
@@ -258,7 +258,7 @@ broken access control.
 ### What a run looks like
 
 ```
-AppSec Framework assessment 20260905T154341Z-7a55b019
+Sulayi assessment 20260905T154341Z-7a55b019
   target:   http://127.0.0.1:8731
   profile:  verification
   surface:  6 operations from openapi-url
@@ -287,10 +287,10 @@ would count it as covered.
 
 ### Where the output goes
 
-Each run writes one directory under `.appsec/`, created `0700` with files `0600`:
+Each run writes one directory under `.sulayi/`, created `0700` with files `0600`:
 
 ```
-.appsec/runs/20260907T025905Z-23923611/
+.sulayi/runs/20260907T025905Z-23923611/
   report.json      the full assessment, including the coverage ledger
   report.sarif     SARIF 2.1.0, for code-scanning tools
   meta.json        what produced this run
@@ -299,7 +299,7 @@ Each run writes one directory under `.appsec/`, created `0700` with files `0600`
 ```
 
 Runs are append-only and independent: nothing is read back from a previous run, so a stale
-directory cannot influence a new assessment. **It is safe to delete `.appsec/` at any
+directory cannot influence a new assessment. **It is safe to delete `.sulayi/` at any
 time**, and it is gitignored by default — do not commit it, because evidence can contain
 whatever your target returned.
 
@@ -342,15 +342,15 @@ control works: that is what the requests are for. So an adapter-derived expectat
 produces a *suspected* finding a human reads, never a confirmed one.
 
 **Two sources that disagree are a finding about your application.** If OpenAPI says an
-operation is public and the framework says it is protected, AppSec Framework does not pick
+operation is public and the framework says it is protected, Sulayi does not pick
 one. It withdraws the expectation from both and reports the disagreement — choosing a
 winner with no evidence would be a guess, and which one won would depend on the order the
 sources happened to be read in.
 
-**An external scanner's confidence is not AppSec's.** ZAP emits four risks and five
+**An external scanner's confidence is not Sulayi's.** ZAP emits four risks and five
 confidences, Nuclei five severities and no confidence, Semgrep three levels. None of those
 scales maps onto another, so none is converted: each engine's own values are preserved
-verbatim beside AppSec's `unassessed`. See
+verbatim beside Sulayi's `unassessed`. See
 [ADR-0015](docs/adr/0015-external-engine-boundary.md).
 
 **A cross-owner result needs three requests, not two.** The owner reads the resource, the
@@ -377,7 +377,7 @@ security design as a bug.
 **Status codes are not trusted alone.** One studied application returns `400` for
 authentication failure, `400` for validation failure, `400` for a missing record, and `200`
 for a record owned by a different user. If your application publishes a stable error code,
-point `outcome.errorCodePointer` at it and AppSec Framework will use it in preference to
+point `outcome.errorCodePointer` at it and Sulayi will use it in preference to
 the status.
 
 ---
@@ -402,11 +402,11 @@ addresses are denied even when private addressing is enabled. See
 
 Secrets are redacted **at capture time**, so they never reach disk. Run directories are
 created `0700` with files `0600`. Redaction is a mitigation, not a guarantee — do not
-commit `.appsec/`.
+commit `.sulayi/`.
 
 ---
 
-## What AppSec Framework does not do yet
+## What Sulayi does not do yet
 
 Being specific about this is part of the product.
 
@@ -419,12 +419,12 @@ Being specific about this is part of the product.
 - **No cross-owner `DELETE`.** It destroys the fixture and proves nothing a `PATCH` does
   not.
 - **External engines are orchestrated, not verified.** Nuclei, ZAP and Semgrep/opengrep can
-  run behind one hardened boundary, but nothing they report is confirmed by AppSec
-  Framework: an alert enters as `observed` with severity `unassessed` and stays there. No
+  run behind one hardened boundary, but nothing they report is confirmed by Sulayi:
+  an alert enters as `observed` with severity `unassessed` and stays there. No
   engine has yet been executed against a real installed binary in this repository's own
   testing, so the milestone is marked partial — see
   [the roadmap](docs/roadmap.md). Hadrian is not integrated.
-- **You install and configure the engines.** AppSec Framework never downloads or installs
+- **You install and configure the engines.** Sulayi never downloads or installs
   one, ships no templates or rules, and will not let an engine fetch its own corpus: a
   corpus that changed overnight makes two runs incomparable.
 - **Framework adapters read source; they do not ask the framework.** The Laravel and
@@ -450,7 +450,7 @@ Being specific about this is part of the product.
 - **No measured precision or recall.** The evaluation harness proves the check
   distinguishes paired vulnerable and secure fixtures; it does not establish a
   false-positive rate on real applications.
-- **AppSec Framework is fingerprintable, so a hostile target can cloak.** Its user agent,
+- **Sulayi is fingerprintable, so a hostile target can cloak.** Its user agent,
   cache buster and baseline paths are identifiable by design, because a scanner that
   disguises itself is harder to authorize and harder to stop. That is the right trade for
   assessing your own application, and a real limitation otherwise.
@@ -479,7 +479,7 @@ policy:
   failOnSuspected: high
 ```
 
-Suspected findings count deliberately. AppSec Framework cannot reach `confirmed` without
+Suspected findings count deliberately. Sulayi cannot reach `confirmed` without
 configured credentials, so gating only on confirmed findings would exit `0` on a real
 authentication bypass — a silent pass is the worst possible default for a security gate.
 
@@ -502,6 +502,7 @@ authentication bypass — a silent pass is the worst possible default for a secu
 | [Product validation gate](docs/evaluation/product-validation-gate.md) | does this justify its complexity? evidence, and a REPOSITION recommendation |
 | [Discovery on real applications](docs/evaluation/discovery-on-reference-applications.md) | what M5 finds on the reference apps, and why that is mostly nothing |
 | [ADR-0017: the reposition](docs/adr/0017-reposition-to-coverage-and-verification.md) | why the ledger is the product and authorization is a contributor |
+| [ADR-0018: the rename to Sulayi](docs/adr/0018-product-identity-sulayi.md) | what was renamed, and why the old names are refused rather than aliased |
 | [Releasing](docs/releases/README.md) | how a release is cut, and why no binaries are published |
 | [ADRs](docs/adr/) | consequential decisions and their alternatives |
 | [Roadmap](docs/roadmap.md) | what is next, and what is explicitly out |
@@ -511,12 +512,12 @@ authentication bypass — a silent pass is the worst possible default for a secu
 ## Authorization
 
 Assess only applications you own or are **explicitly authorized in writing** to test.
-Running this against systems you do not control may be illegal. AppSec Framework is
+Running this against systems you do not control may be illegal. Sulayi is
 deliberately identifiable in its `User-Agent`; do not remove that.
 
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Application Security Framework is not affiliated with OWASP, Checkmarx, ProjectDiscovery,
+Sulayi is not affiliated with OWASP, Checkmarx, ProjectDiscovery,
 Semgrep Inc. or Praetorian. Names are used only to identify those projects.

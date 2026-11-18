@@ -25,11 +25,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/nuclei"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/sast"
-	"github.com/jaylordibe/application-security-framework/internal/scanner/zap"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/scanner/nuclei"
+	"github.com/jaylordibe/sulayi/internal/scanner/sast"
+	"github.com/jaylordibe/sulayi/internal/scanner/zap"
 )
 
 // requireEngine skips unless the engine is installed and answered a version
@@ -61,7 +61,7 @@ func TestNucleiFindsAPlantedMarker(t *testing.T) {
 	}
 	requireEngine(t, nuclei.New(), settings)
 
-	const marker = "appsec-integration-marker"
+	const marker = "sulayi-integration-marker"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/probe" {
 			_, _ = w.Write([]byte("<html>" + marker + "</html>"))
@@ -72,12 +72,12 @@ func TestNucleiFindsAPlantedMarker(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
-	template := "id: appsec-integration-probe\n" +
+	template := "id: sulayi-integration-probe\n" +
 		"info:\n" +
-		"  name: AppSec integration probe\n" +
-		"  author:\n    - appsec\n" +
+		"  name: Sulayi integration probe\n" +
+		"  author:\n    - sulayi\n" +
 		"  severity: info\n" +
-		"  tags:\n    - appsec\n" +
+		"  tags:\n    - sulayi\n" +
 		"http:\n" +
 		"  - method: GET\n" +
 		"    path:\n" +
@@ -107,7 +107,7 @@ func TestNucleiFindsAPlantedMarker(t *testing.T) {
 			len(out.Observations), out.Observations)
 	}
 	o := out.Observations[0]
-	if o.RuleID != "appsec-integration-probe" {
+	if o.RuleID != "sulayi-integration-probe" {
 		t.Errorf("RuleID = %q, want the template's own id", o.RuleID)
 	}
 	if !strings.Contains(o.Location, "/probe") {
@@ -128,18 +128,18 @@ func TestSASTFindsAPlantedMarker(t *testing.T) {
 
 	src := t.TempDir()
 	if err := os.WriteFile(filepath.Join(src, "app.txt"),
-		[]byte("harmless\nappsec_integration_marker\nharmless\n"), 0o600); err != nil {
+		[]byte("harmless\nsulayi_integration_marker\nharmless\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	rules := t.TempDir()
 	rule := "rules:\n" +
-		"  - id: appsec-integration-marker\n" +
+		"  - id: sulayi-integration-marker\n" +
 		"    message: the planted marker\n" +
 		"    severity: WARNING\n" +
 		"    languages:\n      - generic\n" +
 		"    patterns:\n" +
-		"      - pattern-regex: appsec_integration_marker\n"
+		"      - pattern-regex: sulayi_integration_marker\n"
 	if err := os.WriteFile(filepath.Join(rules, "rules.yaml"), []byte(rule), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestSASTFindsAPlantedMarker(t *testing.T) {
 			len(out.Observations), out.Observations)
 	}
 	o := out.Observations[0]
-	if o.RuleID != "appsec-integration-marker" {
+	if o.RuleID != "sulayi-integration-marker" {
 		t.Errorf("RuleID = %q", o.RuleID)
 	}
 	if !strings.Contains(o.Location, "app.txt") {

@@ -13,14 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/discovery"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
-	"github.com/jaylordibe/application-security-framework/internal/resource"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/adapter"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/discovery"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/resource"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // Check is the contract the engine consumes.
@@ -927,7 +927,7 @@ func removeEngineCovered(classes []string, c scanner.Collection) []string {
 	}
 	sort.Strings(by)
 	qualifier := " — assessed by " + strings.Join(by, "; ") +
-		", whose results are recorded as observed and are not verified by AppSec Framework"
+		", whose results are recorded as observed and are not verified by Sulayi"
 
 	out := make([]string, 0, len(classes))
 	for _, cl := range classes {

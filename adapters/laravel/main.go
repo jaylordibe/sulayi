@@ -3,8 +3,8 @@ package main
 import (
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/adapters/internal/source"
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
+	"github.com/jaylordibe/sulayi/adapters/internal/source"
+	"github.com/jaylordibe/sulayi/internal/adapter"
 )
 
 // version is this adapter's own version, independent of the contract version.

@@ -1,7 +1,7 @@
 // M3 evaluation: framework adapters and the provenance-aware oracle.
 //
 // The bar M3 has to clear is not "an adapter produced JSON". It is that an
-// adapter-derived fact changes what AppSec tests, that a wrong or missing
+// adapter-derived fact changes what Sulayi tests, that a wrong or missing
 // adapter never makes a report look better, and that a static inference is
 // never presented as though a request had proved something.
 package evals
@@ -15,15 +15,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/report"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/adapter"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/report"
+	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // silentSpec documents an operation but says nothing about its security. This
@@ -321,7 +321,7 @@ func TestM3_AdapterFailureDoesNotImproveTheReport(t *testing.T) {
 // adapter cannot add an expectation the core then reports against.
 func TestM3_MalformedAdapterOutputIsRejectedWholesale(t *testing.T) {
 	for _, doc := range []string{
-		`{"contractVersion":"appsec.adapter/v9","adapter":{"name":"laravel","version":"1",` +
+		`{"contractVersion":"sulayi.adapter/v9","adapter":{"name":"laravel","version":"1",` +
 			`"extractionMethod":"static-lexical"},"facts":[` +
 			`{"kind":"operation.authentication","operation":{"method":"GET","path":"/api/orders"},` +
 			`"value":"required"}]}`,

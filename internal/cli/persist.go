@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/jaylordibe/application-security-framework/internal/config"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/report"
-	"github.com/jaylordibe/application-security-framework/internal/store"
+	"github.com/jaylordibe/sulayi/internal/config"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/report"
+	"github.com/jaylordibe/sulayi/internal/store"
 )
 
 // persistAndSummarize writes the run artefacts and chooses the exit code.
@@ -35,13 +35,13 @@ func persistAndSummarize(res engine.Result, run *store.Run, pol config.Policy, s
 	// return the same code as one that ran cleanly.
 	if res.ExecutedCount() == 0 {
 		fmt.Fprintln(stderr,
-			"\nappsec: no checks executed. This run establishes nothing about the target.\n"+
+			"\nsulayi: no checks executed. This run establishes nothing about the target.\n"+
 				"       See the coverage ledger in the report for why each item did not run.")
 		return &exitError{code: ExitNothingExecuted}
 	}
 
 	if reasons := policyFailures(res, pol); len(reasons) > 0 {
-		fmt.Fprintln(stderr, "\nappsec: policy threshold exceeded:")
+		fmt.Fprintln(stderr, "\nsulayi: policy threshold exceeded:")
 		for _, r := range reasons {
 			fmt.Fprintf(stderr, "  - %s\n", r)
 		}

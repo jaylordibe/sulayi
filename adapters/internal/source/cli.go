@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
+	"github.com/jaylordibe/sulayi/internal/adapter"
 )
 
 // Main is the shared entry point for the reference adapters.
@@ -40,7 +40,7 @@ type Main struct {
 // the document unparseable, which the core treats as an adapter failure — the
 // right outcome, but a confusing one to debug, so diagnostics go to stderr.
 func (m Main) Run(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("appsec-adapter-"+m.Name, flag.ContinueOnError)
+	fs := flag.NewFlagSet("sulayi-adapter-"+m.Name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("source-root", "", "path to the application source to inspect")
 	version := fs.Bool("version", false, "print the adapter and contract version")

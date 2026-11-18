@@ -27,7 +27,7 @@ func TestNilEnvGivesTheChildNoEnvironment(t *testing.T) {
 		fmt.Println(strings.SplitN(kv, "=", 2)[0])
 	}`)
 
-	t.Setenv("APPSEC_SECRET_UNDER_TEST", "bearer-token")
+	t.Setenv("SULAYI_SECRET_UNDER_TEST", "bearer-token")
 	t.Setenv("GITHUB_TOKEN", "ghp_secret")
 
 	res, err := Run(context.Background(), Spec{Name: "helper", Path: bin, Timeout: 20 * time.Second})
@@ -71,28 +71,28 @@ func TestArgumentsAreNeverInterpreted(t *testing.T) {
 }
 
 func TestMinimalEnvBuildsFromNothing(t *testing.T) {
-	t.Setenv("APPSEC_PASSED", "value")
-	t.Setenv("APPSEC_FORBIDDEN", "secret")
-	t.Setenv("APPSEC_NOT_ASKED_FOR", "also-secret")
+	t.Setenv("SULAYI_PASSED", "value")
+	t.Setenv("SULAYI_FORBIDDEN", "secret")
+	t.Setenv("SULAYI_NOT_ASKED_FOR", "also-secret")
 
 	env := MinimalEnv(
-		[]string{"APPSEC_PASSED", "APPSEC_FORBIDDEN", "APPSEC_PASSED", "", "APPSEC_ABSENT"},
-		[]string{"APPSEC_FORBIDDEN"})
+		[]string{"SULAYI_PASSED", "SULAYI_FORBIDDEN", "SULAYI_PASSED", "", "SULAYI_ABSENT"},
+		[]string{"SULAYI_FORBIDDEN"})
 
 	joined := strings.Join(env, "\n")
-	if !strings.Contains(joined, "APPSEC_PASSED=value") {
+	if !strings.Contains(joined, "SULAYI_PASSED=value") {
 		t.Errorf("a requested variable was dropped: %v", env)
 	}
-	if strings.Contains(joined, "APPSEC_FORBIDDEN") {
+	if strings.Contains(joined, "SULAYI_FORBIDDEN") {
 		t.Errorf("a forbidden variable survived being requested: %v", env)
 	}
-	if strings.Contains(joined, "APPSEC_NOT_ASKED_FOR") {
+	if strings.Contains(joined, "SULAYI_NOT_ASKED_FOR") {
 		t.Errorf("a variable nobody asked for was inherited: %v", env)
 	}
-	if strings.Contains(joined, "APPSEC_ABSENT") {
+	if strings.Contains(joined, "SULAYI_ABSENT") {
 		t.Errorf("an unset variable produced an entry: %v", env)
 	}
-	if n := strings.Count(joined, "APPSEC_PASSED="); n != 1 {
+	if n := strings.Count(joined, "SULAYI_PASSED="); n != 1 {
 		t.Errorf("a repeated name produced %d entries, want 1: %v", n, env)
 	}
 	if !strings.Contains(joined, "LC_ALL=C") {

@@ -1,4 +1,4 @@
-// Package check contains AppSec Framework's native checks.
+// Package check contains Sulayi's native checks.
 //
 // A check turns an expectation into requests, classifies what came back, and
 // returns a result the engine records. Checks never write files, never decide
@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/outcome"
-	"github.com/jaylordibe/application-security-framework/internal/resource"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/outcome"
+	"github.com/jaylordibe/sulayi/internal/resource"
 )
 
 // AuthRequiredID identifies the declared-authentication check.
@@ -618,7 +618,7 @@ func baselineURL(target, nonce string) string {
 	if i := strings.LastIndexByte(target, '/'); i > 0 {
 		target = target[:i]
 	}
-	return target + "/appsec-nonexistent-" + nonce
+	return target + "/sulayi-nonexistent-" + nonce
 }
 
 // cacheBust appends a unique query parameter so an intermediary cache cannot
@@ -632,7 +632,7 @@ func cacheBust(raw string) (string, error) {
 	if strings.Contains(raw, "?") {
 		sep = "&"
 	}
-	return raw + sep + "__appsec_cb=" + nonce, nil
+	return raw + sep + "__sulayi_cb=" + nonce, nil
 }
 
 // cacheFingerprint reports evidence that a response came from a cache.

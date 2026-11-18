@@ -1,18 +1,18 @@
-# Writing an AppSec Framework adapter
+# Writing a Sulayi adapter
 
 An adapter observes an application's own source or runtime and reports
-normalized security facts. AppSec Framework's core never learns what a Laravel
+normalized security facts. Sulayi's core never learns what a Laravel
 middleware group or a NestJS guard is: your adapter translates those into the
 vocabulary below, and the core reasons only about that.
 
 You can write one in any language. The contract is a JSON document on stdout,
-and `schemas/appsec.adapter.schema.json` validates it.
+and `schemas/sulayi.adapter.schema.json` validates it.
 
 ## The shape
 
 ```json
 {
-  "contractVersion": "appsec.adapter/v1alpha1",
+  "contractVersion": "sulayi.adapter/v1alpha1",
   "adapter": {
     "name": "laravel",
     "version": "0.1.0",
@@ -49,7 +49,7 @@ Your adapter is run with an explicit argument vector, never through a shell:
 
 The working directory is the source root, and it is passed explicitly so you
 never have to discover it. **The environment is built from nothing** — not even
-`PATH`. If you need a variable, the operator names it in `passEnv`; AppSec's own
+`PATH`. If you need a variable, the operator names it in `passEnv`; Sulayi's own
 identity credentials can never be forwarded.
 
 ## The five rules that matter

@@ -74,7 +74,7 @@ var forbiddenHeaders = map[string]bool{
 // CredentialSource says where a credential is read from.
 //
 // Exactly one field must be set. Both options keep the secret out of the
-// repository: a value written directly into appsec.yaml would be committed,
+// repository: a value written directly into sulayi.yaml would be committed,
 // reviewed, copied into CI logs and mirrored into every fork, so it is not
 // offered at all rather than offered with a warning.
 type CredentialSource struct {
@@ -200,7 +200,7 @@ func (l Liveness) Accepts(status int) bool {
 	return false
 }
 
-// Identity is a security principal AppSec Framework may act as.
+// Identity is a security principal Sulayi may act as.
 //
 // It holds no credential. Auth.Credential is a reference to where the material
 // lives; the material itself appears only in a Resolved, which is built at run

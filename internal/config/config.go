@@ -1,4 +1,4 @@
-// Package config loads and validates appsec.yaml.
+// Package config loads and validates sulayi.yaml.
 //
 // Configuration is trusted in the sense that the operator wrote it, but it is
 // validated strictly anyway: a trusted author still makes mistakes, and a
@@ -24,13 +24,13 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"github.com/jaylordibe/application-security-framework/internal/adapter"
-	"github.com/jaylordibe/application-security-framework/internal/discovery"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/resource"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/adapter"
+	"github.com/jaylordibe/sulayi/internal/discovery"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/resource"
+	"github.com/jaylordibe/sulayi/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // adapterNamePattern constrains an adapter name to a plain identifier.
@@ -51,9 +51,13 @@ const MaxConfigBytes = 1 << 20 // 1 MiB
 // It is required from day one. Adding a version field later, after strict
 // decoding has already rejected unknown fields, would make every existing
 // configuration invalid.
-const CurrentAPIVersion = "appsec/v1alpha1"
+const CurrentAPIVersion = "sulayi/v1alpha1"
 
-// Config is the parsed appsec.yaml.
+// legacyAPIVersion is the apiVersion written before the project was renamed to
+// Sulayi. It is recognised only to reject it with a migration message.
+const legacyAPIVersion = "appsec/v1alpha1"
+
+// Config is the parsed sulayi.yaml.
 type Config struct {
 	APIVersion  string      `yaml:"apiVersion"`
 	Target      Target      `yaml:"target"`
@@ -136,7 +140,7 @@ type Assessment struct {
 	ExcludeAuthEndpoints *bool `yaml:"excludeAuthEndpoints"`
 }
 
-// Identity is one security principal AppSec Framework may act as.
+// Identity is one security principal Sulayi may act as.
 //
 // The credential itself is deliberately absent from this struct. Only a
 // reference to where the material lives is configurable, so that a credential
@@ -201,8 +205,8 @@ type Resource struct {
 	// Owner is the identity id that owns this resource.
 	Owner string `yaml:"owner"`
 	// CrossOwnerAccess is "denied" or "allowed". Required: whether non-owners
-	// may reach this resource is a statement about the application that AppSec
-	// Framework must not guess. Assuming every owned resource is private would
+	// may reach this resource is a statement about the application that Sulayi
+	// must not guess. Assuming every owned resource is private would
 	// report every deliberately shared record as a broken access control.
 	CrossOwnerAccess string `yaml:"crossOwnerAccess"`
 	// Values fill an operation's declared parameters, keyed by parameter name.
@@ -271,7 +275,7 @@ type AdapterUse struct {
 //
 // Each engine is a named, known integration rather than a command an operator
 // composes. There is deliberately no `command`, `args` or `env` here: those
-// would make AppSec Framework a general process runner, and the argument-vector
+// would make Sulayi a general process runner, and the argument-vector
 // construction, minimal environment and profile gating that make an engine safe
 // to run would all become optional.
 type Engines struct {
@@ -291,7 +295,7 @@ type Engine struct {
 	// name up on PATH.
 	Executable string `yaml:"executable"`
 	// Templates or Rules is the corpus the engine runs. It must be a local
-	// path: AppSec Framework ships none and fetches none, because a corpus that
+	// path: Sulayi ships none and fetches none, because a corpus that
 	// changes between runs makes results incomparable and an unrecorded corpus
 	// is an unrecorded dependency.
 	Templates string `yaml:"templates"`
@@ -423,7 +427,7 @@ func Default() Config {
 			FailOnConfirmed: string(model.SeverityLow),
 			FailOnSuspected: string(model.SeverityHigh),
 		},
-		Output: Output{Dir: ".appsec"},
+		Output: Output{Dir: ".sulayi"},
 	}
 }
 
@@ -476,7 +480,11 @@ func (c *Config) Validate() error {
 	if c.APIVersion == "" {
 		c.APIVersion = CurrentAPIVersion
 	}
-	if c.APIVersion != CurrentAPIVersion {
+	if c.APIVersion == legacyAPIVersion {
+		problems = append(problems, fmt.Sprintf(
+			"apiVersion %q is from before the project was renamed to Sulayi; set apiVersion: %s",
+			c.APIVersion, CurrentAPIVersion))
+	} else if c.APIVersion != CurrentAPIVersion {
 		problems = append(problems, fmt.Sprintf(
 			"apiVersion %q is not supported by this build (expected %q)", c.APIVersion, CurrentAPIVersion))
 	}
@@ -694,13 +702,13 @@ func (c Config) validateEngines() []string {
 		case "nuclei":
 			if e.Templates == "" {
 				problems = append(problems, path+".templates is required when nuclei is enabled; "+
-					"AppSec Framework will not let it fetch templates for itself, because a scan "+
+					"Sulayi will not let it fetch templates for itself, because a scan "+
 					"against a corpus that changed overnight is not reproducible")
 			}
 		case "sast":
 			if e.Rules == "" {
-				problems = append(problems, path+".rules is required when sast is enabled; AppSec "+
-					"Framework ships no rules and will not pull them from a registry")
+				problems = append(problems, path+".rules is required when sast is enabled; Sulayi "+
+					"ships no rules and will not pull them from a registry")
 			}
 			if c.Engines.SourceRoot == "" {
 				problems = append(problems, "engines.sourceRoot is required when sast is enabled; "+

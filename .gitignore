@@ -1,16 +1,16 @@
 # Build output.
-# Anchored with a leading slash: a bare "appsec" would also match the
-# cmd/appsec source directory and silently exclude the program's entrypoint.
+# Anchored with a leading slash: a bare "sulayi" would also match the
+# cmd/sulayi source directory and silently exclude the program's entrypoint.
 /dist/
 /bin/
-/appsec
+/sulayi
 
 # Assessment output (may contain evidence and redaction misses)
-.appsec/
-*.appsec-run/
+.sulayi/
+*.sulayi-run/
 
 # Local overrides
-appsec.local.yaml
+sulayi.local.yaml
 .env
 .env.*
 !.env.example

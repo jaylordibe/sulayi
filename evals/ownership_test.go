@@ -1,7 +1,7 @@
 // M2 evaluation fixtures: two identities and one owned resource.
 //
 // Every fixture below is a deterministic in-process application exhibiting one
-// behaviour a real API exhibits, paired with the verdict AppSec Framework must
+// behaviour a real API exhibits, paired with the verdict Sulayi must
 // reach. The pairing carries the weight: a check that reports the vulnerable
 // application but also reports the one using 404 for anti-enumeration has not
 // learned to tell them apart, it has only learned to complain.
@@ -21,18 +21,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/check"
-	"github.com/jaylordibe/application-security-framework/internal/engine"
-	"github.com/jaylordibe/application-security-framework/internal/httpx"
-	"github.com/jaylordibe/application-security-framework/internal/identity"
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/openapi"
-	"github.com/jaylordibe/application-security-framework/internal/outcome"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/report"
-	"github.com/jaylordibe/application-security-framework/internal/resource"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
-	"github.com/jaylordibe/application-security-framework/internal/store"
+	"github.com/jaylordibe/sulayi/internal/check"
+	"github.com/jaylordibe/sulayi/internal/engine"
+	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/identity"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/openapi"
+	"github.com/jaylordibe/sulayi/internal/outcome"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/report"
+	"github.com/jaylordibe/sulayi/internal/resource"
+	"github.com/jaylordibe/sulayi/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/store"
 )
 
 // ownedSpec declares a parameterised resource operation, readable and writable.
@@ -54,8 +54,8 @@ const ownedSpec = `{
 }`
 
 const (
-	tokenA = "APPSEC_M2_TOKEN_ALICE_11d3a9c0f7"
-	tokenB = "APPSEC_M2_TOKEN_BOB_44e8b1d2a6"
+	tokenA = "SULAYI_M2_TOKEN_ALICE_11d3a9c0f7"
+	tokenB = "SULAYI_M2_TOKEN_BOB_44e8b1d2a6"
 	// theOrder is the resource alice owns and bob must not reach.
 	theOrder = "ord-777"
 	readOp   = "GET /api/orders/{orderId}"
@@ -142,8 +142,8 @@ func runOwnershipWithSpec(
 	if opt.bobToken != "" {
 		bTok = opt.bobToken
 	}
-	t.Setenv("APPSEC_EVAL_ALICE", aTok)
-	t.Setenv("APPSEC_EVAL_BOB", bTok)
+	t.Setenv("SULAYI_EVAL_ALICE", aTok)
+	t.Setenv("SULAYI_EVAL_BOB", bTok)
 
 	mk := func(id, env string) identity.Identity {
 		i := identity.Identity{
@@ -156,8 +156,8 @@ func runOwnershipWithSpec(
 		return i
 	}
 	ids := identity.Resolve([]identity.Identity{
-		mk("alice", "APPSEC_EVAL_ALICE"),
-		mk("bob", "APPSEC_EVAL_BOB"),
+		mk("alice", "SULAYI_EVAL_ALICE"),
+		mk("bob", "SULAYI_EVAL_BOB"),
 	}, srv.URL, client, red)
 
 	values := opt.values
@@ -671,7 +671,7 @@ func TestM2_MutationRequiresTheIntrusiveProfile(t *testing.T) {
 	})
 
 	res := runOwnership(t, mux, ownershipOptions{
-		mutation: map[string]any{"status": "appsec-m2-marker"}, canaryPath: "/api/me",
+		mutation: map[string]any{"status": "sulayi-m2-marker"}, canaryPath: "/api/me",
 		// verification, not intrusive
 	})
 
@@ -791,14 +791,14 @@ func TestM2_IdentitiesDoNotContaminateEachOther(t *testing.T) {
 	}
 	defer client.Close()
 
-	t.Setenv("APPSEC_EVAL_ALICE", tokenA)
-	t.Setenv("APPSEC_EVAL_BOB", tokenB)
+	t.Setenv("SULAYI_EVAL_ALICE", tokenA)
+	t.Setenv("SULAYI_EVAL_BOB", tokenB)
 	ids := identity.Resolve([]identity.Identity{
 		{ID: "alice", Auth: identity.Authentication{Scheme: identity.SchemeBearer,
-			Credential: identity.CredentialSource{Env: "APPSEC_EVAL_ALICE"}},
+			Credential: identity.CredentialSource{Env: "SULAYI_EVAL_ALICE"}},
 			Live: identity.Liveness{Method: http.MethodGet, Path: "/api/me"}},
 		{ID: "bob", Auth: identity.Authentication{Scheme: identity.SchemeBearer,
-			Credential: identity.CredentialSource{Env: "APPSEC_EVAL_BOB"}},
+			Credential: identity.CredentialSource{Env: "SULAYI_EVAL_BOB"}},
 			Live: identity.Liveness{Method: http.MethodGet, Path: "/api/me"}},
 	}, srv.URL, client, red)
 
@@ -938,7 +938,7 @@ func (s *orderStore) current() string {
 
 func mutationOptions() ownershipOptions {
 	return ownershipOptions{
-		mutation:   map[string]any{"status": "appsec-m2-marker"},
+		mutation:   map[string]any{"status": "sulayi-m2-marker"},
 		profile:    model.ProfileIntrusive,
 		canaryPath: "/api/me",
 	}
@@ -1276,8 +1276,8 @@ func runOwnershipWithSink(
 	}
 	t.Cleanup(client.Close)
 
-	t.Setenv("APPSEC_EVAL_ALICE", tokenA)
-	t.Setenv("APPSEC_EVAL_BOB", tokenB)
+	t.Setenv("SULAYI_EVAL_ALICE", tokenA)
+	t.Setenv("SULAYI_EVAL_BOB", tokenB)
 	mk := func(id, env string) identity.Identity {
 		i := identity.Identity{
 			ID:   id,
@@ -1289,7 +1289,7 @@ func runOwnershipWithSink(
 		return i
 	}
 	ids := identity.Resolve([]identity.Identity{
-		mk("alice", "APPSEC_EVAL_ALICE"), mk("bob", "APPSEC_EVAL_BOB"),
+		mk("alice", "SULAYI_EVAL_ALICE"), mk("bob", "SULAYI_EVAL_BOB"),
 	}, srv.URL, client, red)
 
 	parsed, err := openapi.Parse([]byte(ownedSpec), srv.URL,

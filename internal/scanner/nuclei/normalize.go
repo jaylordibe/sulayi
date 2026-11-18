@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // maxLineBytes bounds one JSONL record. A single Nuclei result embeds the
@@ -21,7 +21,7 @@ const maxLineBytes = 4 << 20
 //
 // It is a subset on purpose. Nuclei emits `request`, `response`,
 // `template-encoded` and `curl-command`, and every one of those is a place a
-// credential ends up: the curl command carries the Authorization header AppSec
+// credential ends up: the curl command carries the Authorization header Sulayi
 // itself may have sent, and the request and response are raw HTTP. None of them
 // is decoded here, so none can be persisted by accident later.
 type result struct {
@@ -130,7 +130,7 @@ func (Engine) Normalize(
 	out.Limitations = append(out.Limitations,
 		"Nuclei covers only what the supplied templates cover: "+p.RuleSource+
 			". Weakness classes absent from that corpus were not assessed by it",
-		"AppSec Framework cannot constrain what an individual Nuclei template does. Redirects "+
+		"Sulayi cannot constrain what an individual Nuclei template does. Redirects "+
 			"are not followed, out-of-band interaction is disabled and "+signatures+
 			", but a template in the supplied corpus can still address a host of its own "+
 			"choosing, and that is outside this tool's authorization boundary")
@@ -144,7 +144,7 @@ func toObservation(r result) scanner.Observation {
 		RuleID:   r.TemplateID,
 		RuleName: r.Info.Name,
 		Location: firstNonEmpty(r.Matched, r.Host),
-		// Nuclei's severity, verbatim. It is not translated into AppSec's scale:
+		// Nuclei's severity, verbatim. It is not translated into Sulayi's scale:
 		// the two mean different things, and converting would invent an
 		// assessment nobody made.
 		SourceSeverity: strings.ToLower(strings.TrimSpace(r.Info.Severity)),

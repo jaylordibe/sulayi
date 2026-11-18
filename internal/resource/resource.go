@@ -22,7 +22,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // Expectation states what should happen when a non-owner addresses this
@@ -31,7 +31,7 @@ import (
 // It is required rather than defaulted. Assuming that every resource with an
 // owner is private would report every deliberately shared document — a public
 // profile, a team-visible record, a published article — as a broken access
-// control. The operator states the boundary; AppSec Framework tests it.
+// control. The operator states the boundary; Sulayi tests it.
 type Expectation string
 
 const (
@@ -60,7 +60,7 @@ type Provenance string
 const (
 	// ProvenanceConfigured means the operator declared the fixture.
 	ProvenanceConfigured Provenance = "configured"
-	// ProvenanceAPICreated means AppSec Framework created the resource through
+	// ProvenanceAPICreated means Sulayi created the resource through
 	// the application's own API as the owning identity.
 	//
 	// Declared but not produced in M2: creating a resource needs setup
@@ -147,7 +147,7 @@ func (f Fixture) Validate(path string, knownIdentities map[string]bool) []string
 	if !f.CrossOwnerAccess.Valid() {
 		problems = append(problems, fmt.Sprintf("%s.crossOwnerAccess %q is not one of denied, allowed. "+
 			"It is required: whether non-owners may reach this resource is a statement about your "+
-			"application that AppSec Framework must not guess", path, f.CrossOwnerAccess))
+			"application that Sulayi must not guess", path, f.CrossOwnerAccess))
 	}
 
 	if len(f.Values) == 0 {

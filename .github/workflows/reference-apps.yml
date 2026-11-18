@@ -43,7 +43,7 @@ jobs:
 
       - name: boot it
         working-directory: ${{ runner.temp }}/laravel-api
-        # Its own documented one-command path. Nothing here is AppSec-specific:
+        # Its own documented one-command path. Nothing here is Sulayi-specific:
         # if this breaks, the application's own setup broke.
         run: |
           cp .env.example .env
@@ -68,14 +68,14 @@ jobs:
 
       - name: assess it
         env:
-          APPSEC_REFERENCE_TARGET: http://127.0.0.1:8000
-          APPSEC_REFERENCE_SPEC: http://127.0.0.1:8000/docs/api.json
+          SULAYI_REFERENCE_TARGET: http://127.0.0.1:8000
+          SULAYI_REFERENCE_SPEC: http://127.0.0.1:8000/docs/api.json
         run: go test -v -count=1 -run TestReferenceApplication ./evals/
 
       - name: end-to-end through the CLI an operator would run
         run: |
-          go build -o appsec ./cmd/appsec
-          ./appsec scan http://127.0.0.1:8000 --spec-url http://127.0.0.1:8000/docs/api.json \
+          go build -o sulayi ./cmd/sulayi
+          ./sulayi attack http://127.0.0.1:8000 --spec-url http://127.0.0.1:8000/docs/api.json \
             -o "$RUNNER_TEMP/run" || true
           # A clean tree afterwards: no engine or run artefact may be left behind
           # in the working directory. This is how .nuclei-config was found.
@@ -127,6 +127,6 @@ jobs:
 
       - name: assess it
         env:
-          APPSEC_REFERENCE_TARGET: http://127.0.0.1:3000
-          APPSEC_REFERENCE_SPEC: http://127.0.0.1:3000/api/docs/json
+          SULAYI_REFERENCE_TARGET: http://127.0.0.1:3000
+          SULAYI_REFERENCE_SPEC: http://127.0.0.1:3000/api/docs/json
         run: go test -v -count=1 -run TestReferenceApplication ./evals/

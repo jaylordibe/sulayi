@@ -16,8 +16,8 @@ import (
 // 2.1.0 schema and uses the operation's URL as the artifact location, which the
 // specification permits. GitHub code scanning, however, expects a
 // repository-relative path, so it will ingest this file but will not link
-// results to source. Only source-derived findings can do that, and AppSec
-// Framework has none yet.
+// results to source. Only source-derived findings can do that, and Sulayi
+// has none yet.
 
 // sarifVersion is pinned. Emitting a different version silently would break
 // every consumer's parser.
@@ -188,7 +188,7 @@ func WriteSARIF(w io.Writer, doc Document) error {
 			Kind:    kind,
 			Message: sarifText{Text: f.Title + ". " + f.Actual},
 			PartialFingerprints: map[string]string{
-				"appsecFindingId/v1": fingerprint(f.CheckID + "\x00" + f.OperationID),
+				"sulayiFindingId/v1": fingerprint(f.CheckID + "\x00" + f.OperationID),
 			},
 			Locations: []sarifLocation{{
 				PhysicalLocation: sarifPhysicalLocation{
@@ -230,9 +230,9 @@ func WriteSARIF(w io.Writer, doc Document) error {
 		Version: sarifVersion,
 		Runs: []sarifRun{{
 			Tool: sarifTool{Driver: sarifDriver{
-				Name:           "application-security-framework",
+				Name:           "sulayi",
 				Version:        doc.Tool.Version,
-				InformationURI: "https://github.com/jaylordibe/application-security-framework",
+				InformationURI: "https://github.com/jaylordibe/sulayi",
 				Rules:          ruleList,
 			}},
 			Results: results,
@@ -248,7 +248,7 @@ func WriteSARIF(w io.Writer, doc Document) error {
 			// Coverage has no home in SARIF's vocabulary, so it travels in
 			// properties rather than being dropped.
 			Properties: map[string]any{
-				"appsecSchemaVersion": doc.SchemaVersion,
+				"sulayiSchemaVersion": doc.SchemaVersion,
 				"assurance":           doc.Assurance,
 				"classesNotAssessed":  doc.ClassesNotAssessed,
 				"coverage":            doc.Coverage,
@@ -270,7 +270,7 @@ func WriteSARIF(w io.Writer, doc Document) error {
 				// External engine records travel here so a SARIF consumer can
 				// see which tool produced which result, what version it was,
 				// and which engines failed. SARIF's own tool metadata describes
-				// the *reporting* tool, which is AppSec Framework, so engine
+				// the *reporting* tool, which is Sulayi, so engine
 				// provenance would otherwise be lost.
 				"engines": doc.Engines,
 			},

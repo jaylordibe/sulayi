@@ -27,9 +27,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/proc"
-	"github.com/jaylordibe/application-security-framework/internal/scanner"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/proc"
+	"github.com/jaylordibe/sulayi/internal/scanner"
 )
 
 // candidates are the executables looked for, in order.
@@ -66,7 +66,7 @@ func (Engine) Meta() scanner.Meta {
 		Unlocks: "source-level observations from rules you supply, for classes runtime testing " +
 			"cannot reach",
 		InstallHint: "Install opengrep (https://github.com/opengrep/opengrep) or Semgrep " +
-			"(https://semgrep.dev) and point engines.sast.executable at it. AppSec Framework " +
+			"(https://semgrep.dev) and point engines.sast.executable at it. Sulayi " +
 			"never downloads or installs an engine, and ships no rules.",
 	}
 }
@@ -113,12 +113,12 @@ func (Engine) Detect(ctx context.Context, s scanner.Settings) scanner.Availabili
 		return scanner.Availability{Problem: problem, Path: path}
 	}
 	warn := []string{
-		"the executable at " + path + " is whatever is installed; AppSec Framework records its " +
+		"the executable at " + path + " is whatever is installed; Sulayi records its " +
 			"path and self-reported version but cannot establish its provenance",
 	}
 	if !isOpengrep(path) {
 		warn = append(warn, "Semgrep's metrics default to AUTO, which sends telemetry when rules "+
-			"are pulled from its registry. AppSec Framework passes --metrics=off and requires "+
+			"are pulled from its registry. Sulayi passes --metrics=off and requires "+
 			"local rules, but the setting is the engine's and can be changed elsewhere")
 	}
 	return scanner.Availability{Present: true, Path: path, Version: version, Warnings: warn}
@@ -176,17 +176,17 @@ func (Engine) Invocation(
 	rules := strings.TrimSpace(s.RuleSource)
 	if rules == "" {
 		return scanner.Invocation{}, errors.New(
-			"no rule source is configured at engines.sast.rules. AppSec Framework ships no rules " +
+			"no rule source is configured at engines.sast.rules. Sulayi ships no rules " +
 				"and will not pull them from a registry: registry rules carry their own licence, " +
 				"fetching them is an unannounced network call, and a corpus that changes between " +
 				"runs makes results incomparable")
 	}
 	// A rule source must be a local path. A registry shorthand such as
-	// `p/default` (appsec:refuses-registry) would fetch rules over the network
+	// `p/default` (sulayi:refuses-registry) would fetch rules over the network
 	// and, for Semgrep, turn metrics on.
 	if !isLocalPath(rules) {
 		return scanner.Invocation{}, fmt.Errorf(
-			"the rule source %q is not a local path. AppSec Framework only accepts local rules: a "+
+			"the rule source %q is not a local path. Sulayi only accepts local rules: a "+
 				"registry identifier would fetch over the network and, for Semgrep, enable "+
 				"telemetry", rules)
 	}
@@ -206,7 +206,7 @@ func (Engine) Invocation(
 	// showed otherwise: it rejects `--metrics` outright — it removed telemetry
 	// rather than making it configurable — and has no `--output`,
 	// `--disable-version-check`, `--quiet`, `--timeout` or `--max-target-bytes`
-	// either. Every AppSec run with opengrep configured therefore exited 2 with
+	// either. Every Sulayi run with opengrep configured therefore exited 2 with
 	// "unknown option '--metrics'" and was correctly reported as blocked, which
 	// is the right failure but for a reason that was ours.
 	//
@@ -225,8 +225,8 @@ func (Engine) Invocation(
 			// Keep the rule id the rule's author wrote.
 			//
 			// By default a rule loaded from a local path is renamed to include
-			// that path, so `appsec-marker` in /tmp/xyz/rules.yaml becomes
-			// `tmp.xyz.rules.appsec-marker`. That puts the operator's directory
+			// that path, so `sulayi-marker` in /tmp/xyz/rules.yaml becomes
+			// `tmp.xyz.rules.sulayi-marker`. That puts the operator's directory
 			// layout into every finding, and — because a rules directory is
 			// often a temporary or per-checkout path — changes the finding id
 			// between runs of the same assessment, which breaks both
@@ -282,7 +282,7 @@ func isLocalPath(v string) bool {
 	if strings.Contains(v, "://") {
 		return false
 	}
-	// Semgrep registry shorthands look like `p/default`, `r/go`, or `auto`. appsec:refuses-registry
+	// Semgrep registry shorthands look like `p/default`, `r/go`, or `auto`. sulayi:refuses-registry
 	if v == "auto" {
 		return false
 	}

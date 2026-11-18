@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jaylordibe/application-security-framework/internal/store"
+	"github.com/jaylordibe/sulayi/internal/store"
 )
 
 func run(t *testing.T, args ...string) (int, string, string) {
@@ -44,18 +44,37 @@ func TestExitCodesAreDistinct(t *testing.T) {
 
 func TestScanWithNoTargetFailsWithUsage(t *testing.T) {
 	t.Chdir(t.TempDir())
-	code, _, errOut := run(t, "scan")
+	code, _, errOut := run(t, "attack")
 	if code != ExitUsage {
 		t.Fatalf("exit = %d, want %d", code, ExitUsage)
 	}
-	if !strings.Contains(errOut, "appsec scan http://localhost:3000") {
+	if !strings.Contains(errOut, "sulayi attack http://localhost:3000") {
 		t.Errorf("error does not suggest the next command: %q", errOut)
+	}
+}
+
+// A configuration under the pre-rename file name must stop the run. Ignoring it
+// would assess with defaults and silently drop the operator's scope,
+// exclusions and identities.
+func TestLegacyConfigFileStopsTheRun(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "appsec.yaml"),
+		[]byte("apiVersion: appsec/v1alpha1\ntarget:\n  baseURL: http://127.0.0.1:1/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := run(t, "attack", "http://127.0.0.1:1/")
+	if code != ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, ExitUsage)
+	}
+	if !strings.Contains(errOut, "appsec.yaml") || !strings.Contains(errOut, "sulayi.yaml") {
+		t.Errorf("error does not explain the rename: %q", errOut)
 	}
 }
 
 func TestInvalidProfileFailsWithUsage(t *testing.T) {
 	t.Chdir(t.TempDir())
-	code, _, errOut := run(t, "scan", "http://127.0.0.1:1/", "--profile", "aggressive")
+	code, _, errOut := run(t, "attack", "http://127.0.0.1:1/", "--profile", "aggressive")
 	if code != ExitUsage {
 		t.Fatalf("exit = %d, want %d", code, ExitUsage)
 	}
@@ -73,7 +92,7 @@ func TestNoSpecificationAborts(t *testing.T) {
 	defer srv.Close()
 	t.Chdir(t.TempDir())
 
-	code, _, errOut := run(t, "scan", srv.URL)
+	code, _, errOut := run(t, "attack", srv.URL)
 	if code != ExitAborted {
 		t.Fatalf("exit = %d, want %d (aborted)", code, ExitAborted)
 	}
@@ -98,7 +117,7 @@ func TestAllBlockedRunDoesNotReportSuccess(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	// POST requires the intrusive profile, so nothing may run.
-	code, _, errOut := run(t, "scan", srv.URL)
+	code, _, errOut := run(t, "attack", srv.URL)
 	if code != ExitNothingExecuted {
 		t.Fatalf("exit = %d, want %d (nothing executed)", code, ExitNothingExecuted)
 	}
@@ -133,7 +152,7 @@ func TestScanProducesReportAndLedger(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	code, out, errOut := run(t, "scan", srv.URL)
+	code, out, errOut := run(t, "attack", srv.URL)
 	if code != ExitOK {
 		t.Fatalf("exit = %d, want %d", code, ExitOK)
 	}
@@ -143,7 +162,7 @@ func TestScanProducesReportAndLedger(t *testing.T) {
 		t.Errorf("summary omits the assurance statement: %q", out)
 	}
 
-	matches, err := filepath.Glob(filepath.Join(dir, ".appsec", "runs", "*", "report.json"))
+	matches, err := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "report.json"))
 	if err != nil || len(matches) != 1 {
 		t.Fatalf("report not written: %v %v", matches, err)
 	}
@@ -205,7 +224,7 @@ func TestScanProducesReportAndLedger(t *testing.T) {
 func TestScopeRefusalIsNotReportedAsNothingFound(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Cloud metadata is denied unconditionally, so every probe is refused.
-	code, _, errOut := run(t, "scan", "http://169.254.169.254/")
+	code, _, errOut := run(t, "attack", "http://169.254.169.254/")
 	if code != ExitAborted {
 		t.Fatalf("exit = %d, want %d", code, ExitAborted)
 	}
@@ -227,18 +246,18 @@ func TestInitWritesConfigAndRefusesOverwrite(t *testing.T) {
 	if code, _, _ := run(t, "init"); code != ExitOK {
 		t.Fatalf("init exit = %d", code)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "appsec.yaml"))
+	data, err := os.ReadFile(filepath.Join(dir, "sulayi.yaml"))
 	if err != nil {
-		t.Fatalf("appsec.yaml not written: %v", err)
+		t.Fatalf("sulayi.yaml not written: %v", err)
 	}
-	if !strings.Contains(string(data), "apiVersion: appsec/v1alpha1") {
+	if !strings.Contains(string(data), "apiVersion: sulayi/v1alpha1") {
 		t.Error("generated config has no apiVersion")
 	}
 	// Only assert the mode where the platform enforces one; see
 	// store.PermissionsEnforced.
-	info, err := os.Stat(filepath.Join(dir, "appsec.yaml"))
+	info, err := os.Stat(filepath.Join(dir, "sulayi.yaml"))
 	if store.PermissionsEnforced() && err == nil && info.Mode().Perm() != 0o600 {
-		t.Errorf("appsec.yaml mode = %o, want 600", info.Mode().Perm())
+		t.Errorf("sulayi.yaml mode = %o, want 600", info.Mode().Perm())
 	}
 
 	if code, _, _ := run(t, "init"); code != ExitUsage {
@@ -256,7 +275,7 @@ func TestGeneratedConfigIsValid(t *testing.T) {
 	if code, _, _ := run(t, "init"); code != ExitOK {
 		t.Fatal("init failed")
 	}
-	_, _, errOut := run(t, "scan", "http://127.0.0.1:1/")
+	_, _, errOut := run(t, "attack", "http://127.0.0.1:1/")
 	if strings.Contains(errOut, "unknown field") || strings.Contains(errOut, "apiVersion") {
 		t.Fatalf("generated config does not parse: %q", errOut)
 	}
@@ -360,7 +379,7 @@ func TestSuspectedHighFindingFailsThePolicy(t *testing.T) {
 	defer srv.Close()
 	t.Chdir(t.TempDir())
 
-	code, _, errOut := run(t, "scan", srv.URL)
+	code, _, errOut := run(t, "attack", srv.URL)
 	if code != ExitFindings {
 		t.Fatalf("exit = %d, want %d; a detected bypass must fail the build", code, ExitFindings)
 	}
@@ -375,7 +394,7 @@ func TestSuspectedHighFindingFailsThePolicy(t *testing.T) {
 func TestNoFlagAcceptsARawSecret(t *testing.T) {
 	forbidden := []string{"--token", "--api-key", "--apikey", "--password",
 		"--secret", "--credential", "--bearer", "--auth"}
-	for _, cmd := range []string{"scan", "init", "doctor"} {
+	for _, cmd := range []string{"attack", "init", "doctor"} {
 		_, out, errOut := run(t, cmd, "--help")
 		help := out + errOut
 		for _, flag := range forbidden {
@@ -390,24 +409,24 @@ func TestNoFlagAcceptsARawSecret(t *testing.T) {
 // doctor reports whether a credential is available. It must never report what
 // the credential is: its output is pasted into issues and CI logs.
 func TestDoctorReportsIdentitiesWithoutValues(t *testing.T) {
-	const secret = "APPSEC_M1_SECRET_MUST_NEVER_PERSIST_7f91"
+	const secret = "SULAYI_M1_SECRET_MUST_NEVER_PERSIST_7f91"
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "appsec.yaml"), []byte(
-		"apiVersion: appsec/v1alpha1\n"+
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(
+		"apiVersion: sulayi/v1alpha1\n"+
 			"target:\n  baseURL: http://localhost:3000\n"+
 			"identities:\n"+
 			"  - id: admin\n"+
 			"    authentication:\n"+
 			"      type: bearer\n"+
-			"      credential:\n        env: APPSEC_DOCTOR_TOKEN\n"+
+			"      credential:\n        env: SULAYI_DOCTOR_TOKEN\n"+
 			"  - id: missing\n"+
 			"    authentication:\n"+
 			"      type: bearer\n"+
-			"      credential:\n        env: APPSEC_DOCTOR_ABSENT\n"), 0o600); err != nil {
+			"      credential:\n        env: SULAYI_DOCTOR_ABSENT\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("APPSEC_DOCTOR_TOKEN", secret)
+	t.Setenv("SULAYI_DOCTOR_TOKEN", secret)
 
 	code, out, _ := run(t, "doctor")
 	if code != ExitOK {
@@ -458,19 +477,19 @@ func TestScanWarnsAboutAnUnresolvableCredential(t *testing.T) {
 
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "appsec.yaml"), []byte(
-		"apiVersion: appsec/v1alpha1\n"+
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(
+		"apiVersion: sulayi/v1alpha1\n"+
 			"target:\n  baseURL: "+srv.URL+"\n"+
 			"scope:\n  allowPrivateAddresses: true\n"+
 			"identities:\n"+
 			"  - id: admin\n"+
 			"    authentication:\n"+
 			"      type: bearer\n"+
-			"      credential:\n        env: APPSEC_SCAN_ABSENT\n"), 0o600); err != nil {
+			"      credential:\n        env: SULAYI_SCAN_ABSENT\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, errOut := run(t, "scan", "--spec-url", srv.URL+"/openapi.json")
+	_, _, errOut := run(t, "attack", "--spec-url", srv.URL+"/openapi.json")
 	if !strings.Contains(errOut, "credential unavailable") {
 		t.Errorf("a missing credential was not reported on stderr: %q", errOut)
 	}
@@ -479,7 +498,7 @@ func TestScanWarnsAboutAnUnresolvableCredential(t *testing.T) {
 	}
 
 	// The identity limitation must reach the report, not only the terminal.
-	matches, err := filepath.Glob(filepath.Join(dir, ".appsec", "runs", "*", "report.json"))
+	matches, err := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "report.json"))
 	if err != nil || len(matches) == 0 {
 		t.Fatalf("no report written: %v", err)
 	}

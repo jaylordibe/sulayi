@@ -2,13 +2,13 @@
 
 Status: M0–M5 are implemented and tested. This document describes the shape of the system
 and marks clearly what exists today. See `docs/roadmap.md` for what is next and `README.md`
-for the honest list of what AppSec Framework cannot yet do.
+for the honest list of what Sulayi cannot yet do.
 
 ---
 
 ## 1. The one-sentence version
 
-AppSec Framework produces an **account** of an assessment — what was tested, what was
+Sulayi produces an **account** of an assessment — what was tested, what was
 blocked, what was never attempted, and why — and holds every contributor to it, its own
 checks included, to evidence rather than to assertion.
 
@@ -76,9 +76,9 @@ implementation genuinely exists or is imminent.
 
 | Package | Owns | Status |
 |---|---|---|
-| `cmd/appsec` | binary entrypoint | ✅ |
+| `cmd/sulayi` | binary entrypoint | ✅ |
 | `internal/cli` | command surface, exit codes, human output | ✅ |
-| `internal/config` | `appsec.yaml` loading, strict decode, semantic validation | ✅ |
+| `internal/config` | `sulayi.yaml` loading, strict decode, semantic validation | ✅ |
 | `internal/model` | the normalized application-security model | ✅ |
 | `internal/scope` | the authorization boundary for every request | ✅ |
 | `internal/httpx` | the only way to reach the network | ✅ |
@@ -200,7 +200,7 @@ exists to avoid — an identity id belongs in every report, and a credential bel
 ```
 Identity            (id, label, scheme, credential reference, optional canary)
    ↓  resolved once, at run start
-CredentialSource    (env or file — never a value in appsec.yaml)
+CredentialSource    (env or file — never a value in sulayi.yaml)
    ↓
 Secret              (String/GoString/MarshalJSON render a placeholder; Expose is the
                      single deliberate reader)
@@ -492,14 +492,14 @@ Nuclei / ZAP / Semgrep
    finding: state=observed, severity=unassessed
         │
         ▼
-   AppSec verification (if any exists for the class)
+   Sulayi verification (if any exists for the class)
         │
         ▼
    suspected / confirmed / rejected
 ```
 
 The vertical line matters more than the boxes. An external alert enters at
-`observed` and only AppSec's own deterministic verification can move it. Where
+`observed` and only Sulayi's own deterministic verification can move it. Where
 this project has no verification for a class — which is most of what these
 engines find — `observed` is the final state, and that is the honest answer
 rather than a gap.
@@ -510,7 +510,7 @@ rather than a gap.
 that would produce `suspected` or `confirmed`, because there is no fact about an
 external alert that would justify one.
 
-AppSec's severity for an imported result is `unassessed`: a value with no rank,
+Sulayi's severity for an imported result is `unassessed`: a value with no rank,
 so it cannot satisfy a policy threshold and cannot fail a build. The engine's own
 severity and confidence sit beside it, verbatim. ZAP emits four risks and five
 confidences, Nuclei five severities and no confidence, Semgrep three levels —

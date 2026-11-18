@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
+	"github.com/jaylordibe/sulayi/internal/model"
 )
 
 // Comparing two responses for "material equivalence" is the discriminator that

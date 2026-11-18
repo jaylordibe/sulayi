@@ -1,4 +1,4 @@
-// Package httpx is the only way AppSec Framework reaches the network.
+// Package httpx is the only way Sulayi reaches the network.
 //
 // It enforces the scope policy at two independent points, because neither is
 // sufficient alone:
@@ -38,9 +38,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
-	"github.com/jaylordibe/application-security-framework/internal/scope"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // ErrBodyTooLarge is returned when a response body exceeds the capture limit.
@@ -75,7 +75,7 @@ type Options struct {
 	MaxBodyBytes int64
 	// MaxResponseHeaderBytes bounds response headers.
 	MaxResponseHeaderBytes int64
-	// UserAgent identifies AppSec Framework. Being identifiable is deliberate:
+	// UserAgent identifies Sulayi. Being identifiable is deliberate:
 	// an assessment tool that disguises itself is harder to authorize and
 	// harder to stop.
 	UserAgent string
@@ -111,7 +111,7 @@ const (
 	DefaultTimeout                = 20 * time.Second
 	DefaultMaxBodyBytes           = 1 << 20 // 1 MiB
 	DefaultMaxResponseHeaderBytes = 1 << 18 // 256 KiB
-	DefaultUserAgent              = "AppSec-Framework (+https://github.com/jaylordibe/application-security-framework)"
+	DefaultUserAgent              = "Sulayi (+https://github.com/jaylordibe/sulayi)"
 )
 
 // New builds a Client. It returns an error rather than falling back to an
@@ -246,7 +246,7 @@ func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Con
 	// name that resolves to more addresses than the target listens on, which is
 	// the ordinary case for "localhost" on a machine with IPv6: it resolves to
 	// ::1 and 127.0.0.1, and a great many development servers bind only IPv4.
-	// Dialling addrs[0] and giving up turned "appsec scan http://localhost:3000"
+	// Dialling addrs[0] and giving up turned "sulayi attack http://localhost:3000"
 	// — the most natural first command anyone types — into a connection-refused
 	// abort against a target that was running and reachable.
 	//

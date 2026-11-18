@@ -1,4 +1,4 @@
-// Package identity models the security principals AppSec Framework may act as,
+// Package identity models the security principals Sulayi may act as,
 // and the authentication material it uses to act as them.
 //
 // The central distinction this package exists to enforce is that an identity is

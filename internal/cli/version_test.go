@@ -9,7 +9,7 @@ import (
 // A user who follows the documented install command must be able to say what
 // they are running.
 //
-// `go install <module>/cmd/appsec@v0.1.0` never runs the Makefile, so the
+// `go install <module>/cmd/sulayi@v0.1.0` never runs the Makefile, so the
 // -ldflags value stays at its development default and every installed copy
 // reported "0.0.0-dev". That makes every bug report ambiguous about what was
 // running, which for a security tool is worse than cosmetic.
@@ -52,9 +52,9 @@ func TestVersionPrecedence(t *testing.T) {
 // report, without the reporter having to be told what to paste.
 func TestVersionCommandIdentifiesTheBuild(t *testing.T) {
 	_, out, _ := run(t, "version")
-	for _, want := range []string{"appsec ", "go:", "platform:", "schema:"} {
+	for _, want := range []string{"sulayi ", "go:", "platform:", "schema:"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("`appsec version` omits %q:\n%s", want, out)
+			t.Errorf("`sulayi version` omits %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "%!") {

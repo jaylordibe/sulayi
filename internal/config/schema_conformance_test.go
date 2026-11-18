@@ -22,7 +22,7 @@ import (
 // client inside a security tool.
 func compileSchema(t *testing.T) *jsonschema.Schema {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "appsec.config.schema.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "sulayi.config.schema.json"))
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
@@ -33,10 +33,10 @@ func compileSchema(t *testing.T) *jsonschema.Schema {
 	c := jsonschema.NewCompiler()
 	// No loader is registered, so any attempt to fetch a remote resource fails
 	// closed rather than reaching the network.
-	if err := c.AddResource("https://appsec.local/config.json", doc); err != nil {
+	if err := c.AddResource("https://sulayi.local/config.json", doc); err != nil {
 		t.Fatalf("add schema: %v", err)
 	}
-	s, err := c.Compile("https://appsec.local/config.json")
+	s, err := c.Compile("https://sulayi.local/config.json")
 	if err != nil {
 		t.Fatalf("compile schema: %v", err)
 	}
@@ -59,7 +59,7 @@ func validateAgainstSchema(t *testing.T, schema *jsonschema.Schema, doc string) 
 // validDocuments must be accepted by both the parser and the schema.
 var validDocuments = map[string]string{
 	"surface discovery, every field set": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 discovery:
@@ -77,7 +77,7 @@ discovery:
     assessAdapterDiscovered: false
 `,
 	"surface discovery turned off entirely": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 discovery:
@@ -86,7 +86,7 @@ discovery:
     enabled: false
 `,
 	"resource fixture": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 identities:
@@ -107,7 +107,7 @@ resources:
       orderId: "abc123"
 `,
 	"shared resource with mutation and narrowing": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 identities:
@@ -128,16 +128,16 @@ resources:
     nonOwners: [user-b]
     mutation:
       values:
-        status: "appsec-marker"
+        status: "sulayi-marker"
 `,
 	"no resources": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 resources: []
 `,
 	"bearer identity": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 identities:
@@ -146,14 +146,14 @@ identities:
     authentication:
       type: bearer
       credential:
-        env: APPSEC_ADMIN_TOKEN
+        env: SULAYI_ADMIN_TOKEN
     liveness:
       method: GET
       path: /api/me
       expectStatus: [200]
 `,
 	"api key identity from a file": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 identities:
@@ -166,18 +166,18 @@ identities:
         file: /run/secrets/service-key
 `,
 	"no identities": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 identities: []
 `,
 	"minimal": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 `,
 	"full": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: https://staging.example.com
   name: staging
@@ -207,10 +207,10 @@ environment:
   name: staging
   differences: ["rate limiting: relaxed"]
 output:
-  dir: .appsec
+  dir: .sulayi
 `,
 	"authorized intrusive": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://localhost:3000
 assessment:
@@ -223,34 +223,34 @@ assessment:
 // is expressible in the schema.
 var structurallyInvalidDocuments = map[string]string{
 	"unknown top-level field": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 nonsense: true
 `,
 	"unknown nested field": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 assessment:
   profil: discovery
 `,
 	"invalid profile": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 assessment:
   profile: aggressive
 `,
 	"concurrency out of range": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 assessment:
   concurrency: 999
 `,
 	"port out of range": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 scope:
@@ -259,24 +259,24 @@ scope:
       ports: [70000]
 `,
 	"error pointer without leading slash": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 outcome:
   errorCodePointer: errorCode
 `,
 	"target with embedded credentials": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://user:pass@x.test
 `,
 	"wrong apiVersion": `
-apiVersion: appsec/v99
+apiVersion: sulayi/v99
 target:
   baseURL: http://x.test
 `,
 	"identity id is reserved": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -286,7 +286,7 @@ identities:
       credential: {env: A_TOKEN}
 `,
 	"identity id is not a slug": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -296,7 +296,7 @@ identities:
       credential: {env: A_TOKEN}
 `,
 	"unsupported authentication type": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -306,7 +306,7 @@ identities:
       credential: {env: A_TOKEN}
 `,
 	"credential header name is not a token": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -317,7 +317,7 @@ identities:
       credential: {env: A_TOKEN}
 `,
 	"credential has neither env nor file": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -327,7 +327,7 @@ identities:
       credential: {}
 `,
 	"credential has both env and file": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -337,7 +337,7 @@ identities:
       credential: {env: A_TOKEN, file: /tmp/t}
 `,
 	"a literal credential value is not a field": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -348,7 +348,7 @@ identities:
       credential: {env: A_TOKEN}
 `,
 	"canary path is not absolute": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -360,7 +360,7 @@ identities:
       path: api/me
 `,
 	"resource has no crossOwnerAccess": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -378,7 +378,7 @@ resources:
     values: {orderId: "1"}
 `,
 	"resource expectation is not a known value": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -397,7 +397,7 @@ resources:
     values: {orderId: "1"}
 `,
 	"resource value contains a path separator": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -416,7 +416,7 @@ resources:
     values: {orderId: "../../admin"}
 `,
 	"resource value contains a query delimiter": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -435,7 +435,7 @@ resources:
     values: {orderId: "a?b=1"}
 `,
 	"resource has no values": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -454,7 +454,7 @@ resources:
     values: {}
 `,
 	"resource id is not a slug": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -473,7 +473,7 @@ resources:
     values: {orderId: "1"}
 `,
 	"mutation without values": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -493,7 +493,7 @@ resources:
     mutation: {}
 `,
 	"canary method is unsafe": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -532,7 +532,7 @@ func TestSchemaAcceptsEverythingTheParserAccepts(t *testing.T) {
 // be the sort of overstatement this project exists to avoid.
 var semanticallyInvalidDocuments = map[string]string{
 	"resource owner is not a configured identity": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -551,7 +551,7 @@ resources:
     values: {orderId: "1"}
 `,
 	"non-owner is not a configured identity": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -571,7 +571,7 @@ resources:
     nonOwners: [ghost]
 `,
 	"owner listed as its own non-owner": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -591,7 +591,7 @@ resources:
     nonOwners: [user-a]
 `,
 	"duplicate resource ids": `
-apiVersion: appsec/v1alpha1
+apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://x.test
 identities:
@@ -643,11 +643,11 @@ func TestSchemaAndParserAgreeOnRejection(t *testing.T) {
 
 // The shipped example must be valid, or the first thing a user edits is broken.
 func TestExampleConfigIsValid(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "appsec.example.yaml"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "sulayi.example.yaml"))
 	if err != nil {
 		t.Fatalf("read example: %v", err)
 	}
-	if _, err := Parse(bytes.NewReader(raw), "appsec.example.yaml"); err != nil {
+	if _, err := Parse(bytes.NewReader(raw), "sulayi.example.yaml"); err != nil {
 		t.Fatalf("the shipped example does not parse: %v", err)
 	}
 	if err := validateAgainstSchema(t, compileSchema(t), string(raw)); err != nil {

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaylordibe/application-security-framework/internal/model"
-	"github.com/jaylordibe/application-security-framework/internal/proc"
-	"github.com/jaylordibe/application-security-framework/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/proc"
+	"github.com/jaylordibe/sulayi/internal/redact"
 )
 
 // The single most important property in this file: **a failed engine is never
@@ -196,7 +196,7 @@ func Run(ctx context.Context, e Engine, t Target, s Settings, opts Options) Outc
 
 // newWorkspace creates a private temporary directory for one run.
 func newWorkspace(id string) (Workspace, func(), error) {
-	dir, err := os.MkdirTemp("", "appsec-engine-"+id+"-")
+	dir, err := os.MkdirTemp("", "sulayi-engine-"+id+"-")
 	if err != nil {
 		return Workspace{}, func() {}, err
 	}

@@ -1,10 +1,10 @@
 # External engines
 
-AppSec Framework can orchestrate Nuclei, ZAP and a source analyser (opengrep or
+Sulayi can orchestrate Nuclei, ZAP and a source analyser (opengrep or
 Semgrep). It does not reimplement what they do, and it does not believe what they
 say.
 
-## What AppSec Framework does and does not do
+## What Sulayi does and does not do
 
 | It does | It does not |
 |---|---|
@@ -15,7 +15,7 @@ say.
 | Account honestly for engines that failed, timed out or never ran | Treat a failed engine as a clean result |
 | Ship no templates and no rules | Write a rule corpus or a payload library |
 
-**Every engine result is `observed`.** AppSec Framework's severity for it is
+**Every engine result is `observed`.** Sulayi's severity for it is
 `unassessed`, which has no rank and cannot satisfy a policy threshold. An engine
 saying `critical` is that engine's opinion of its own rule. Two engines agreeing
 is not verification.
@@ -48,7 +48,7 @@ No compatibility is claimed for versions other than those above.
 ## Installing
 
 Nothing here is installed for you — a security tool that installs software is a
-supply chain. `appsec doctor` reports what is present and what each absent engine
+supply chain. `sulayi doctor` reports what is present and what each absent engine
 would unlock, and changes nothing.
 
 | Engine | Get it from |
@@ -88,13 +88,13 @@ opengrep v1.29.0's own `scan --help`:
 | `--disable-version-check` | yes | **no** |
 | `--quiet`, `--timeout`, `--max-target-bytes` | yes | **no** |
 
-AppSec builds a different argument vector for each, chosen by the executable's name.
+Sulayi builds a different argument vector for each, chosen by the executable's name.
 Before that it passed Semgrep's flags to both, so every opengrep run exited 2 with
 `unknown option '--metrics'` — the preferred engine could never run.
 
 `--no-rewrite-rule-ids` is passed to both. Without it, a rule loaded from a local file is
-renamed to include that file's path, so `appsec-marker` in `/tmp/xyz/rules.yaml` becomes
-`tmp.xyz.rules.appsec-marker`: the operator's directory layout ends up in every finding,
+renamed to include that file's path, so `sulayi-marker` in `/tmp/xyz/rules.yaml` becomes
+`tmp.xyz.rules.sulayi-marker`: the operator's directory layout ends up in every finding,
 and the finding id changes between runs whenever the rules directory is temporary.
 
 **Semgrep's own argument vector has not been verified against a real binary.** opengrep
@@ -104,7 +104,7 @@ has. If you run Semgrep and something is rejected, that is the reason.
 
 Nuclei skips templates that carry no signature, and a template you wrote carries
 none. So a corpus of your own templates would be excluded in full: Nuclei would
-exit successfully, print nothing, and AppSec Framework would report a completed
+exit successfully, print nothing, and Sulayi would report a completed
 scan with no findings — having executed no security logic at all.
 
 That run is refused before it starts. If nothing in the directory is signed:
@@ -136,7 +136,7 @@ corpus that ran is smaller than the directory."*
 
 `zap.sh` is a launcher: it locates a JVM and execs it. It is given `JAVA_HOME`, `PATH` and
 `TMPDIR`, and nothing else — not the assessment's credentials, not your shell. Given
-nothing at all, as it was before the release gate, it cannot find java, exits 1, and AppSec
+nothing at all, as it was before the release gate, it cannot find java, exits 1, and Sulayi
 reports ZAP as not installed.
 
 Its version is read from the line containing only a version number. `zap.sh` prints
@@ -157,7 +157,7 @@ Never passed: `-code`, `-headless`, `-allow-local-file-access`,
 `-proxy`, `-interactsh-server`. All default to off; they are listed because "we
 did not pass it" is only a control if you can see it was a decision.
 
-**The honest limit:** once Nuclei is running, AppSec Framework cannot constrain
+**The honest limit:** once Nuclei is running, Sulayi cannot constrain
 what an individual template does. A template in your corpus can address a host of
 its own choosing. Redirects are not followed and OAST is disabled, which narrows
 this; it does not close it, and every run says so.
@@ -175,8 +175,13 @@ engines:
 Run one-shot (`zap.sh -cmd`), not as a daemon, with a private home inside the
 run's workspace so a scan cannot accumulate state in your home directory.
 
-- **`passive`** (default) spiders and reports what passive rules observe. It
-  requires the `verification` profile.
+- **`passive`** (default) is meant to spider and report what passive rules observe.
+  It **also requires the `intrusive` profile and `authorizeIntrusive`**, so ZAP never
+  runs at the default profile. Its passivity rests on `-quickprogress`, which ZAP's
+  [Quick Start command-line documentation](https://www.zaproxy.org/docs/desktop/addons/quick-start/cmdline/)
+  describes only as showing progress bars, and no `-quick*` option disables the
+  active scanner. Until a run against a real ZAP shows that no active-scan job
+  executes, passive mode is gated as if it were active.
 - **`active`** additionally runs ZAP's active scanner, which sends attack
   payloads. It requires the `intrusive` profile and `authorizeIntrusive`.
 
@@ -184,7 +189,7 @@ A passive run **does not assess injection or cross-site scripting** and does not
 claim to: those classes stay in `classesNotAssessed`, because passive rules
 observe responses and never send the payloads that would test them.
 
-ZAP runs **unauthenticated**. AppSec Framework does not hand identity credentials
+ZAP runs **unauthenticated**. Sulayi does not hand identity credentials
 to a third-party engine, so anything reachable only when signed in is unscanned.
 That is a deliberate trade, and it is reported on every run.
 

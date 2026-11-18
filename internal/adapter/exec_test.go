@@ -69,7 +69,7 @@ func runAdapter(t *testing.T, body string, opts Options, mutate func(*Spec)) Out
 	return Run(context.Background(), spec, opts)
 }
 
-const validDoc = `{"contractVersion":"appsec.adapter/v1alpha1",` +
+const validDoc = `{"contractVersion":"sulayi.adapter/v1alpha1",` +
 	`"adapter":{"name":"probe","version":"1","extractionMethod":"static-lexical"},"facts":[]}`
 
 func TestRunAcceptsAWellBehavedAdapter(t *testing.T) {
@@ -86,10 +86,10 @@ func TestRunAcceptsAWellBehavedAdapter(t *testing.T) {
 // credentials, registry tokens and this tool's own identity credentials; an
 // adapter runs against a repository nobody vouched for.
 func TestAdapterEnvironmentIsBuiltFromNothing(t *testing.T) {
-	t.Setenv("APPSEC_ADMIN_TOKEN", "super-secret-identity-token")
+	t.Setenv("SULAYI_ADMIN_TOKEN", "super-secret-identity-token")
 	t.Setenv("GITHUB_TOKEN", "ghp_secret")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
-	t.Setenv("APPSEC_HARMLESS", "harmless-value")
+	t.Setenv("SULAYI_HARMLESS", "harmless-value")
 
 	body := `
 	names := []string{}
@@ -104,7 +104,7 @@ func TestAdapterEnvironmentIsBuiltFromNothing(t *testing.T) {
 		if out.Err != nil {
 			t.Fatalf("adapter failed: %v", out.Err)
 		}
-		for _, leaked := range []string{"APPSEC_ADMIN_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY"} {
+		for _, leaked := range []string{"SULAYI_ADMIN_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY"} {
 			if strings.Contains(out.Stderr, leaked) {
 				t.Errorf("%s reached the adapter's environment", leaked)
 			}
@@ -116,9 +116,9 @@ func TestAdapterEnvironmentIsBuiltFromNothing(t *testing.T) {
 
 	t.Run("an explicitly named variable is forwarded", func(t *testing.T) {
 		out := runAdapter(t, body, Options{Trust: TrustNone}, func(s *Spec) {
-			s.PassEnv = []string{"APPSEC_HARMLESS"}
+			s.PassEnv = []string{"SULAYI_HARMLESS"}
 		})
-		if !strings.Contains(out.Stderr, "APPSEC_HARMLESS") {
+		if !strings.Contains(out.Stderr, "SULAYI_HARMLESS") {
 			t.Errorf("an explicitly passed variable did not reach the adapter: %q", out.Stderr)
 		}
 	})
@@ -126,14 +126,14 @@ func TestAdapterEnvironmentIsBuiltFromNothing(t *testing.T) {
 	t.Run("a credential cannot be forwarded even when named", func(t *testing.T) {
 		out := runAdapter(t, body, Options{
 			Trust:        TrustNone,
-			ForbiddenEnv: []string{"APPSEC_ADMIN_TOKEN"},
+			ForbiddenEnv: []string{"SULAYI_ADMIN_TOKEN"},
 		}, func(s *Spec) {
-			s.PassEnv = []string{"APPSEC_ADMIN_TOKEN", "APPSEC_HARMLESS"}
+			s.PassEnv = []string{"SULAYI_ADMIN_TOKEN", "SULAYI_HARMLESS"}
 		})
-		if strings.Contains(out.Stderr, "APPSEC_ADMIN_TOKEN") {
+		if strings.Contains(out.Stderr, "SULAYI_ADMIN_TOKEN") {
 			t.Error("an identity credential was forwarded despite being forbidden")
 		}
-		if !strings.Contains(out.Stderr, "APPSEC_HARMLESS") {
+		if !strings.Contains(out.Stderr, "SULAYI_HARMLESS") {
 			t.Error("the forbidden variable suppressed an allowed one")
 		}
 	})
@@ -170,7 +170,7 @@ func TestAdapterFailuresAreExplicit(t *testing.T) {
 		{name: "malformed JSON", body: "fmt.Print(`{not json`)", wantErr: "not a valid contract document"},
 		{
 			name:    "unknown contract version",
-			body:    "fmt.Print(`{\"contractVersion\":\"appsec.adapter/v9\",\"adapter\":{\"name\":\"probe\",\"version\":\"1\",\"extractionMethod\":\"static-lexical\"},\"facts\":[]}`)",
+			body:    "fmt.Print(`{\"contractVersion\":\"sulayi.adapter/v9\",\"adapter\":{\"name\":\"probe\",\"version\":\"1\",\"extractionMethod\":\"static-lexical\"},\"facts\":[]}`)",
 			wantErr: "not supported by this build",
 		},
 		{
