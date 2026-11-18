@@ -435,3 +435,7 @@ func isSigned(path string) bool {
 	}
 	return false
 }
+
+// Locate finds the configured or PATH executable without running it, so a
+// blocked engine can still be reported as installed.
+func Locate(s scanner.Settings) (string, error) { return resolve(s.Executable) }

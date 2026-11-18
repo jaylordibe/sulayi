@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -72,5 +73,48 @@ func TestAuditFailureStopsFurtherRequests(t *testing.T) {
 	}
 	if got := hits.Load(); got != 1 {
 		t.Errorf("the target received %d requests, want 1", got)
+	}
+}
+
+// An error returned by Do reaches ledger details and the report, so its text
+// must already be redacted. Go's url.Error renders the full request URL; here
+// the URL carries a secret in its query and a registered secret in its path, and
+// the server drops the connection so a url.Error is what comes back.
+func TestErrorsLeaveDoRedacted(t *testing.T) {
+	const querySecret = "q5ecret-query-value-0123456789"
+	const pathSecret = "p5ecret-path-value-0123456789"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("no hijacker")
+		}
+		conn, _, _ := hj.Hijack()
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+	c := newClient(t, loopbackPolicy(t, portOf(t, srv.URL)), nil)
+	defer c.Close()
+	c.red.Register(pathSecret, "[REDACTED]")
+
+	_, err := c.Do(context.Background(), Request{Method: "GET",
+		URL: srv.URL + "/orders/" + pathSecret + "?access_token=" + querySecret})
+	if err == nil {
+		t.Fatal("a dropped connection returned no error")
+	}
+	if s := err.Error(); strings.Contains(s, querySecret) || strings.Contains(s, pathSecret) {
+		t.Fatalf("the error text carries a secret: %q", s)
+	}
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if strings.Contains(e.Error(), querySecret) || strings.Contains(e.Error(), pathSecret) {
+			t.Fatalf("a secret is reachable through the error chain: %q", e.Error())
+		}
+	}
+
+	// Meaning survives redaction: a cancellation is still a cancellation.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = c.Do(ctx, Request{Method: "GET", URL: srv.URL + "/"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v; redaction lost the cancellation", err)
 	}
 }

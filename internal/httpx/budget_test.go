@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The budget is a hard limit on what reaches the target: a refused request is
@@ -78,5 +80,49 @@ func TestNotSentIsFalseForTransportFailures(t *testing.T) {
 	}
 	if NotSent(errors.New("connection reset")) {
 		t.Error("an ordinary transport failure was reported as not sent; it may have reached the target")
+	}
+}
+
+// A closed client sends nothing: a request made after Close, or one waiting for
+// a pacing slot when Close happens, is refused rather than released unpaced.
+func TestClosedClientSendsNothing(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	c := newClient(t, loopbackPolicy(t, portOf(t, srv.URL)), func(o *Options) {
+		o.RequestsPerSecond = 0.001
+		o.MaxRequests = 10
+	})
+
+	waiting := make(chan error, 1)
+	go func() {
+		_, err := c.Do(context.Background(), Request{Method: "GET", URL: srv.URL + "/"})
+		waiting <- err
+	}()
+	// Give the first request time to take its budget and park on the limiter.
+	deadline := time.After(5 * time.Second)
+	for c.Usage().Used == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("the request never reached the limiter")
+		default:
+			runtime.Gosched()
+		}
+	}
+	c.Close()
+
+	select {
+	case err := <-waiting:
+		if !NotSent(err) {
+			t.Errorf("a request waiting on Close: err = %v, want not sent", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a request waiting for a pacing slot was not released by Close")
+	}
+	if _, err := c.Do(context.Background(), Request{Method: "GET", URL: srv.URL + "/"}); !NotSent(err) {
+		t.Errorf("a request after Close: err = %v, want not sent", err)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("a closed client sent %d request(s)", n)
 	}
 }

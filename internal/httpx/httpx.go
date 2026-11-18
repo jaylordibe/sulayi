@@ -124,6 +124,7 @@ type Client struct {
 
 	auditSeq    atomic.Int64
 	auditBroken atomic.Bool
+	closed      atomic.Bool
 }
 
 // AuditRecord is what the request log learns about one Do call. Every string in
@@ -364,7 +365,7 @@ func (l *limiter) wait(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-l.done:
-		return nil
+		return errClosed
 	case <-l.ticker.C:
 		return nil
 	}
@@ -373,6 +374,7 @@ func (l *limiter) wait(ctx context.Context) error {
 // Close stops pacing and releases anything waiting on it. Stopping a ticker does
 // not close its channel, so a waiter would otherwise block forever.
 func (c *Client) Close() {
+	c.closed.Store(true)
 	if c.limiter == nil {
 		return
 	}
@@ -418,7 +420,36 @@ func (c *Client) Do(ctx context.Context, r Request) (model.Exchange, error) {
 	at := c.now()
 	ex, err := c.do(ctx, r)
 	c.audit(ctx, r, at, ex, err)
+	if err != nil {
+		err = c.redactError(err)
+	}
 	return ex, err
+}
+
+// redactedError carries an error out of Do with its text redacted and its
+// meaning intact.
+//
+// Callers put an error's text into ledger details and from there into the
+// report, so the raw text must not leave the client: Go's url.Error renders the
+// full request URL, query string included. The chain is kept, so a caller can
+// still ask whether a request was refused, out of budget or cancelled — but for
+// a url.Error the chain continues from its cause, so the raw URL is not
+// reachable through Unwrap either.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+func (c *Client) redactError(err error) error {
+	cause := err
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		cause = ue.Err
+	}
+	return &redactedError{msg: c.red.Error(err), err: cause}
 }
 
 // audit records one call. Classifying the outcome by error type rather than
@@ -464,8 +495,19 @@ func (c *Client) audit(ctx context.Context, r Request, at time.Time, ex model.Ex
 	}
 }
 
+// errClosed reports a request made after the client was closed. It used to be
+// sent anyway, unpaced, because a closed limiter released its waiters.
+var errClosed = errors.New("httpx: the client is closed")
+
 // do performs one request without recording it.
 func (c *Client) do(ctx context.Context, r Request) (model.Exchange, error) {
+	if c.closed.Load() {
+		err := &ErrNotSent{Err: errClosed}
+		return model.Exchange{
+			Request: model.CapturedRequest{Method: strings.ToUpper(r.Method), URL: c.red.URL(r.URL)},
+			Err:     err.Error(),
+		}, err
+	}
 	captured := model.CapturedRequest{
 		Method: strings.ToUpper(r.Method),
 		URL:    c.red.URL(r.URL),

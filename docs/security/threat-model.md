@@ -249,6 +249,13 @@ The most likely real-world harm from this tool is not a broken scan — it is a 
 - Un-redacted capture is not available. If it is ever added it must be per-run, explicit,
   and loudly recorded in the report. **PLANNED**.
 
+**Errors (S0).** An error returned by the HTTP client is redacted before it
+leaves, because callers put its text into ledger details and the report, and Go's
+URL errors render the full request URL. Its meaning survives — refusals, budget
+and cancellation are still detectable — but for a URL error the chain continues
+from its cause, so the raw URL is not reachable by unwrapping either. **TESTED**
+(`httpx.TestErrorsLeaveDoRedacted`).
+
 **Cookies (S0).** From a `Set-Cookie` header only the cookie's own value is learned
 as a secret, quoted or not; its attributes (domain, path, expiry) are not, because
 learning them blanked the target's hostname out of every later exchange. Values
@@ -1132,7 +1139,13 @@ stopping it must not be how data gets left modified.
   detached context bounded to 30 seconds, so cancellation and the duration limit
   cannot interrupt them. A second signal exits at once. **TESTED**
   (`evals.TestS0_CancellationAfterTheWriteStillRestoresTheFixture`, which cancels
-  the run at the moment the write lands and fails if the detachment is removed).
+  the run at the moment the write lands and fails if the detachment is removed;
+  against the built binary, `TestInterruptStopsTheRunAndStillReports` and
+  `TestSecondInterruptExitsImmediately`, which sends the second signal while a
+  restoration is in progress).
+- **A closed client sends nothing.** A request made after the client is closed,
+  or waiting for a pacing slot when it closes, is refused rather than released
+  unpaced. **TESTED** (`httpx.TestClosedClientSendsNothing`).
 - **Incomplete cleanup is never folded into a clean result.** A restoration that
   fails, cannot be verified, or cannot be attempted because the fixture's state is
   unknown names the fixture in `cleanupIncomplete`, at the top of the terminal

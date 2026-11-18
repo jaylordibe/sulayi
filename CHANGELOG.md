@@ -58,6 +58,11 @@ consumer can detect a change rather than misparse.
 - Restoration after a cross-owner write used the assessment's context, so cancelling the
   run could leave a fixture modified with nothing reported.
 - Budget, safety and cancellation errors were reported as `transport_error`.
+- Errors returned by the HTTP client carried unredacted text, including the full request
+  URL, into ledger details and the report.
+- A request waiting for a pacing slot when the client closed was released and sent
+  unpaced.
+- `doctor` reports where a blocked engine is installed, without executing it.
 
 ## [0.1.0] — unreleased
 

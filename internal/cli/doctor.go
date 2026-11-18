@@ -141,6 +141,12 @@ func reportEngines(ctx context.Context, stdout io.Writer, configPath string) {
 		settings["sast"] = cfg.Engines.SAST.EngineSettings()
 	}
 
+	// Blocked engines are located without being run, so doctor can still say
+	// whether one is installed.
+	locators := map[string]func(scanner.Settings) (string, error){
+		"nuclei": nuclei.Locate,
+		"zap":    zap.Locate,
+	}
 	for _, e := range []scanner.Engine{nuclei.New(), zap.New(), sast.New()} {
 		meta := e.Meta()
 		enabledLabel := "disabled"
@@ -152,6 +158,13 @@ func reportEngines(ctx context.Context, stdout io.Writer, configPath string) {
 		// contact the network on start-up. It is reported as blocked, with why.
 		if !meta.Offline {
 			fmt.Fprintf(stdout, "  %-12s %-18s %-9s %s\n", meta.Title, "BLOCKED", enabledLabel, meta.Unlocks)
+			if locate := locators[meta.ID]; locate != nil {
+				if path, err := locate(settings[meta.ID]); err == nil {
+					fmt.Fprintf(stdout, "  %-12s installed at %s (not executed)\n", "", path)
+				} else {
+					fmt.Fprintf(stdout, "  %-12s not found: %v\n", "", err)
+				}
+			}
 			fmt.Fprint(stdout, wrapIndented(scanner.NetworkBlockedDetail(meta.Title), 64, "               "))
 			continue
 		}

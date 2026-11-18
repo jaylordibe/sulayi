@@ -857,3 +857,30 @@ func TestAggressiveProfileRunsOnceConfirmed(t *testing.T) {
 		})
 	}
 }
+
+// doctor says whether a blocked engine is installed, and finds out without
+// running it.
+func TestDoctorLocatesBlockedEnginesWithoutRunningThem(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the tripwire executable is a POSIX shell script")
+	}
+	dir := t.TempDir()
+	t.Chdir(dir)
+	marker := filepath.Join(dir, "started")
+	bin := filepath.Join(dir, "nuclei")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ntouch '"+marker+"'\necho v9.9.9\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: http://127.0.0.1:1\n" +
+		"engines:\n  nuclei:\n    enabled: true\n    executable: " + bin + "\n    templates: " + dir + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "sulayi.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ := run(t, "doctor")
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("doctor executed a blocked engine")
+	}
+	if !strings.Contains(out, "installed at "+bin+" (not executed)") {
+		t.Errorf("doctor does not say where the blocked engine is installed:\n%s", out)
+	}
+}
