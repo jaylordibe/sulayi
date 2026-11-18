@@ -117,10 +117,6 @@ jobs:
           yarn install --frozen-lockfile --non-interactive
           npx prisma generate
           npx prisma migrate deploy
-          # The application refuses to boot unless its permission catalog has
-          # been projected onto the database; its own migrate service runs this
-          # after the migrations, and so must a fresh database here.
-          yarn rbac:sync
           nohup yarn start:dev > "$RUNNER_TEMP/nestjs.log" 2>&1 &
           for i in $(seq 1 90); do
             curl -fsS -o /dev/null http://127.0.0.1:3000/api/docs/json && break
