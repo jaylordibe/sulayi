@@ -99,7 +99,7 @@ jobs:
           node-version: 24
 
       - name: check out the reference application
-        run: git clone --depth 1 https://github.com/jaylordibe/nestjs-api.git "$RUNNER_TEMP/nestjs-api"
+        run: git clone --depth 1 https://github.com/jaylordibe/nestjs-api-starter.git "$RUNNER_TEMP/nestjs-api"
 
       - name: boot it
         working-directory: ${{ runner.temp }}/nestjs-api
@@ -114,9 +114,12 @@ jobs:
                               'JWT_SECRET="' + secrets.token_hex(32) + '"', s, flags=re.M))
           PY
           docker compose up -d
+          # Mirrors the starter's own README Quick start, which owns its setup.
+          # If that changes, this step should change with it.
           yarn install --frozen-lockfile --non-interactive
-          npx prisma generate
-          npx prisma migrate deploy
+          yarn prisma:generate
+          yarn prisma:deploy
+          yarn prisma:seed
           nohup yarn start:dev > "$RUNNER_TEMP/nestjs.log" 2>&1 &
           for i in $(seq 1 90); do
             curl -fsS -o /dev/null http://127.0.0.1:3000/api/docs/json && break
