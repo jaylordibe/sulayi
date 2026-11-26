@@ -3,8 +3,8 @@
 package jsonpointer
 
 import (
+	"bytes"
 	"encoding/json"
-	"strconv"
 	"strings"
 )
 
@@ -15,8 +15,13 @@ func String(body []byte, pointer string) (string, bool) {
 	if !strings.HasPrefix(pointer, "/") {
 		return "", false
 	}
+	// Numbers are kept as their literal text. Decoding them as float64 would
+	// round an id above 2^53 into a different id, and a request addressed by
+	// it would reach a different record.
 	var cur any
-	if err := json.Unmarshal(body, &cur); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(&cur); err != nil {
 		return "", false
 	}
 	for _, rawToken := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
@@ -33,10 +38,8 @@ func String(body []byte, pointer string) (string, bool) {
 	switch v := cur.(type) {
 	case string:
 		return v, true
-	case float64:
-		// Numeric error codes are common. Trimming trailing zeros here would
-		// turn 100 into "1" and silently break every configured mapping.
-		return strconv.FormatFloat(v, 'f', -1, 64), true
+	case json.Number:
+		return v.String(), true
 	case bool:
 		if v {
 			return "true", true
