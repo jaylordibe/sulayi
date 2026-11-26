@@ -1,0 +1,97 @@
+# Ground truth for OWASP Juice Shop v20.4.0, written from its source before any
+# measurement run (ADR-0025). Each entry is a vulnerability the application
+# ships deliberately, with the check(s) that would report it and where in the
+# source it is. `assessed: false` entries are in a class Sulayi does not test;
+# they are listed so the measurement states what it did not look at.
+#
+# Source: https://github.com/juice-shop/juice-shop/tree/v20.4.0
+#         (commit 266448aba68cd8ba5915f526a128da4fa7bc3f9f)
+# Image:  bkimminich/juice-shop@sha256:9bbaecc41791f00b002bc65931cc5ff355fbdb941fa72b06558c18dace43197b
+target: juice-shop
+entries:
+  - id: js-sqli-product-search
+    challenge: "User Credentials / Database Schema (Injection)"
+    checks: [sql-injection-boolean]
+    operation: { method: GET, path: /rest/products/search }
+    assessed: true
+    source: routes/search.ts:23 — q is concatenated into LIKE '%…%'
+    note: >-
+      The input sits inside LIKE '%…%', so a quoted boolean condition is
+      closed by the application's own '%' and evaluates false. A browser
+      recording carries no query parameters (ADR-0021), so with Juice Shop's
+      recorded surface this operation has no parameter to inject into.
+  - id: js-stack-trace
+    challenge: "Error Handling (Security Misconfiguration)"
+    checks: [stack-trace-disclosure]
+    operation: { method: GET, path: "/**" }
+    assessed: true
+    source: server.ts:722 — errorhandler() renders the stack of any unhandled error
+    note: Needs a parameter to malform; recorded operations carry none.
+  - id: js-open-redirect
+    challenge: "Allowlist Bypass (Unvalidated Redirects)"
+    checks: [open-redirect]
+    operation: { method: GET, path: /redirect }
+    assessed: true
+    source: lib/insecurity.ts:136 — allowlist matched with url.includes()
+    note: >-
+      Exploitable only by embedding an allowlisted URL in the target. The
+      front end does not request /redirect while browsing, so the recording
+      does not contain it.
+  - id: js-bola-basket
+    challenge: "View Basket (Broken Access Control)"
+    checks: [cross-owner-resource-read]
+    operation: { method: GET, path: /rest/basket/* }
+    assessed: true
+    source: routes/basket.ts:19 — findOne by id; any signed-in user reads any basket
+    note: >-
+      A recorded operation is a concrete path (/rest/basket/1) with no path
+      parameter, so no fixture can address it.
+  - id: js-bfla-users
+    challenge: "Admin Section (Broken Access Control)"
+    checks: [cross-role-read]
+    operation: { method: GET, path: /api/Users }
+    assessed: true
+    source: server.ts:395 — isAuthorized() only; any signed-in user lists every user
+    note: The administration page does not request it, so the recording does not contain it.
+  - id: js-bfla-authentication-details
+    challenge: "Admin Section (Broken Access Control)"
+    checks: [cross-role-read]
+    operation: { method: GET, path: /rest/user/authentication-details }
+    assessed: true
+    source: server.ts:430 — isAuthorized() only; every user's sign-in details
+  - id: js-xss-track-order
+    challenge: "Reflected XSS (XSS)"
+    checks: []
+    operation: { method: GET, path: /rest/track-order/* }
+    assessed: false
+    reason: Reflected in JSON and rendered by the client; Sulayi tests server-rendered HTML.
+  - id: js-xss-dom-search
+    challenge: "DOM XSS (XSS)"
+    checks: []
+    operation: { method: GET, path: /search }
+    assessed: false
+    reason: Client-side (DOM) XSS; Sulayi runs no browser.
+  - id: js-sqli-login
+    challenge: "Login Admin / Login Jim / Login Bender (Injection)"
+    checks: []
+    operation: { method: POST, path: /rest/user/login }
+    assessed: false
+    reason: In a request body; S4 injects into GET query and path parameters only.
+  - id: js-register-admin
+    challenge: "Admin Registration (Improper Input Validation)"
+    checks: []
+    operation: { method: POST, path: /api/Users }
+    assessed: false
+    reason: Mass assignment in a request body; not a class Sulayi tests.
+  - id: js-basket-manipulate
+    challenge: "Manipulate Basket (Broken Access Control)"
+    checks: []
+    operation: { method: POST, path: /api/BasketItems }
+    assessed: false
+    reason: A state-changing request no declared record recipe covers.
+  - id: js-deprecated-b2b
+    challenge: "Deprecated Interface (Security Misconfiguration)"
+    checks: []
+    operation: { method: POST, path: /b2b/v2/orders }
+    assessed: false
+    reason: Use of a deprecated interface; not a class Sulayi tests.

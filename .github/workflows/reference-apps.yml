@@ -92,6 +92,27 @@ jobs:
                   findings: [.findings[] | select(.checkId | startswith("cross-")) | {checkId, operationId, identityId, state}]}' "$report"
             exit 1; }
 
+      - name: score it as a false-positive control
+        # The MVP measurement's control (ADR-0025): no expected file, so every
+        # finding counts as false.
+        if: always()
+        run: |
+          set -o pipefail
+          go run ./evals/mvp/measure -target laravel-api-starter -commit "$GITHUB_SHA" \
+            -json "$RUNNER_TEMP/login-run/measurement.json" \
+            $(ls -d "$RUNNER_TEMP"/login-run/runs/*/ | sort) | tee "$RUNNER_TEMP/login-run/measurement.md"
+          cat "$RUNNER_TEMP/login-run/measurement.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        # The false-positive control for the MVP measurement (ADR-0025).
+        if: always()
+        with:
+          name: laravel-api-starter
+          path: |
+            ${{ runner.temp }}/login-run/measurement.*
+            ${{ runner.temp }}/login-run/runs/*/report.json
+            ${{ runner.temp }}/login-run/runs/*/requests.jsonl
+
       - name: assess it without its specification
         # The spec-less path: the Laravel adapter's routing table and the crawl
         # are the surface, the access policy is the oracle. Operations must be
@@ -201,3 +222,24 @@ jobs:
                   rows: [.coverage[] | select(.dimension == "ownership" or .dimension == "role") | {dimension, subject, identityId, disposition, cause, detail}],
                   findings: [.findings[] | select(.checkId | startswith("cross-")) | {checkId, operationId, identityId, state}]}' "$report"
             exit 1; }
+
+      - name: score it as a false-positive control
+        # The MVP measurement's control (ADR-0025): no expected file, so every
+        # finding counts as false.
+        if: always()
+        run: |
+          set -o pipefail
+          go run ./evals/mvp/measure -target nestjs-api-starter -commit "$GITHUB_SHA" \
+            -json "$RUNNER_TEMP/login-run/measurement.json" \
+            $(ls -d "$RUNNER_TEMP"/login-run/runs/*/ | sort) | tee "$RUNNER_TEMP/login-run/measurement.md"
+          cat "$RUNNER_TEMP/login-run/measurement.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        # The false-positive control for the MVP measurement (ADR-0025).
+        if: always()
+        with:
+          name: nestjs-api-starter
+          path: |
+            ${{ runner.temp }}/login-run/measurement.*
+            ${{ runner.temp }}/login-run/runs/*/report.json
+            ${{ runner.temp }}/login-run/runs/*/requests.jsonl

@@ -1,0 +1,103 @@
+# Ground truth for OWASP crAPI v1.1.6, written from its source before any
+# measurement run (ADR-0025). See juice-shop.expected.yaml for the format.
+#
+# Source: https://github.com/OWASP/crAPI/tree/v1.1.6
+#         (commit 700f03d12a392d9e408260b4beae72ed02a4a1a4)
+# Images: the v1.1.6 compose file runs VERSION=latest; the images are pinned
+#         by the digests recorded in .github/workflows/mvp-measurement.yml.
+target: crapi
+entries:
+  - id: crapi-bola-vehicle-location
+    challenge: "1 — BOLA: access details of another user's vehicle"
+    checks: [cross-owner-resource-read]
+    operation: { method: GET, path: /identity/api/v2/vehicle/*/location }
+    assessed: true
+    source: services/identity/.../VehicleServiceImpl.java:151 — findByUuid(carId), no owner check
+  - id: crapi-bola-order
+    challenge: "BOLA on orders (the order view behind challenges 8 and 9)"
+    checks: [cross-owner-resource-read]
+    operation: { method: GET, path: /workshop/api/shop/orders/* }
+    assessed: true
+    source: services/workshop/crapi/shop/views.py:122 — Order.objects.get(id=order_id), no owner check
+  - id: crapi-unauthenticated-order
+    challenge: "Unauthenticated access to an order (same view)"
+    checks: [declared-auth-not-enforced]
+    operation: { method: GET, path: /workshop/api/shop/orders/* }
+    assessed: true
+    source: >-
+      services/workshop/crapi/shop/views.py:109 — OrderControlView.get has no
+      @jwt_auth_required, while the specification declares bearerAuth
+  - id: crapi-bfla-users-all
+    challenge: "BFLA: the administrators' user view"
+    checks: [cross-role-read]
+    operation: { method: GET, path: /workshop/api/management/users/all }
+    assessed: true
+    source: services/workshop/crapi/user/views.py:35 — "View for admin user", jwt_auth_required only
+  - id: crapi-bola-mechanic-report
+    challenge: "2 — BOLA: access mechanic reports of other users"
+    checks: []
+    operation: { method: GET, path: /workshop/api/mechanic/mechanic_report }
+    assessed: false
+    reason: The object is named by a query parameter; fixtures fill path parameters only.
+  - id: crapi-unauthenticated-report
+    challenge: "14 — Unauthenticated access"
+    checks: []
+    operation: { method: GET, path: /workshop/api/mechanic/receive_report }
+    assessed: false
+    reason: >-
+      The application's own specification declares it public (security: []),
+      so nothing states the expectation it violates.
+  - id: crapi-bfla-delete-video
+    challenge: "7 — BFLA: delete another user's video via the admin endpoint"
+    checks: []
+    operation: { method: DELETE, path: /identity/api/v2/admin/videos/* }
+    assessed: false
+    reason: Cross-role probes are GET only; proving this one deletes a video.
+  - id: crapi-sqli-coupon
+    challenge: "13 — SQL injection: redeem an already claimed coupon"
+    checks: []
+    operation: { method: POST, path: /workshop/api/shop/apply_coupon }
+    assessed: false
+    reason: In a request body; S4 injects into GET query and path parameters only.
+  - id: crapi-nosqli-coupon
+    challenge: "12 — NoSQL injection: free coupons"
+    checks: []
+    operation: { method: POST, path: /community/api/v2/coupon/validate-coupon }
+    assessed: false
+    reason: In a request body.
+  - id: crapi-ssrf
+    challenge: "11 — SSRF"
+    checks: []
+    operation: { method: POST, path: /workshop/api/merchant/contact_mechanic }
+    assessed: false
+    reason: SSRF needs an out-of-band listener; deferred (ADR-0023).
+  - id: crapi-data-exposure
+    challenge: "4/5 — Excessive data exposure"
+    checks: []
+    operation: { method: GET, path: /community/api/v2/community/posts/recent }
+    assessed: false
+    reason: Excessive data exposure is not a class Sulayi tests.
+  - id: crapi-mass-assignment
+    challenge: "8/9/10 — Mass assignment"
+    checks: []
+    operation: { method: PUT, path: /workshop/api/shop/orders/* }
+    assessed: false
+    reason: Mass assignment in a request body; not a class Sulayi tests.
+  - id: crapi-password-reset
+    challenge: "3 — Broken authentication: reset another user's password"
+    checks: []
+    operation: { method: POST, path: /identity/api/auth/v3/check-otp }
+    assessed: false
+    reason: OTP brute force; not a class Sulayi tests.
+  - id: crapi-jwt
+    challenge: "15 — Forge a valid JWT"
+    checks: []
+    operation: { method: GET, path: /identity/api/v2/user/dashboard }
+    assessed: false
+    reason: >-
+      Token forgery (the dashboard accepts a token whose signature is not
+      checked); not a class Sulayi tests.
+# Correctly scoped routes, where a finding would be a false positive.
+negatives:
+  - operation: { method: GET, path: "/identity/api/v2/user/videos/{video_id}" }
+    source: services/identity/.../ProfileServiceImpl.java:126 — the caller's own video only

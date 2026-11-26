@@ -1,0 +1,166 @@
+name: MVP measurement
+
+# The MVP measurement (ADR-0025): Sulayi against OWASP Juice Shop and OWASP
+# crAPI, at pinned versions, three runs each under the default profile, scored
+# against ground truth written from each target's source before any run
+# (evals/mvp/*.expected.yaml). The reference starters are the false-positive
+# control: reference-apps.yml uploads their reports, and every finding on them
+# counts as false.
+#
+# Manual only. It boots deliberately vulnerable applications, bound to
+# 127.0.0.1 on an ephemeral runner, and its results are published as measured
+# in docs/evaluation/mvp-measurement.md.
+#
+# Actions and images are pinned: actions by commit, images by digest. A tag can
+# be moved; a digest cannot.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mvp-measurement
+  cancel-in-progress: false
+
+jobs:
+  juice-shop:
+    name: OWASP Juice Shop v20.4.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version-file: go.mod
+
+      - name: boot it
+        run: |
+          docker run -d --name juice-shop -p 127.0.0.1:3000:3000 \
+            bkimminich/juice-shop@sha256:9bbaecc41791f00b002bc65931cc5ff355fbdb941fa72b06558c18dace43197b
+          for i in $(seq 1 60); do
+            curl -fsS -o /dev/null http://127.0.0.1:3000/rest/admin/application-version && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3000/rest/admin/application-version
+
+      - name: assess it three times
+        # The seeded accounts' credentials are published in Juice Shop's own
+        # source (data/static/users.yml); they are a demo application's.
+        run: |
+          go build -o sulayi ./cmd/sulayi
+          cat > "$RUNNER_TEMP/juice.env" <<'ENV'
+          JUICE_ADMIN_EMAIL=admin@juice-sh.op
+          JUICE_ADMIN_PASSWORD=admin123
+          JUICE_JIM_EMAIL=jim@juice-sh.op
+          JUICE_JIM_PASSWORD=ncc-1701
+          JUICE_BENDER_EMAIL=bender@juice-sh.op
+          JUICE_BENDER_PASSWORD=OhG0dPlease1nsertLiquor!
+          ENV
+          chmod 600 "$RUNNER_TEMP/juice.env"
+          for n in 1 2 3; do
+            ./sulayi attack -c evals/mvp/juice-shop.sulayi.yaml --har evals/mvp/juice-shop.har \
+              --env "$RUNNER_TEMP/juice.env" -o "$RUNNER_TEMP/juice-shop" || true
+          done
+
+      - name: measure
+        run: |
+          set -o pipefail
+          go run ./evals/mvp/measure -target juice-shop -expected evals/mvp/juice-shop.expected.yaml -commit "$GITHUB_SHA" \
+            -json "$RUNNER_TEMP/juice-shop/measurement.json" \
+            $(ls -d "$RUNNER_TEMP"/juice-shop/runs/*/ | sort) | tee "$RUNNER_TEMP/juice-shop/measurement.md"
+          cat "$RUNNER_TEMP/juice-shop/measurement.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: juice-shop
+          path: |
+            ${{ runner.temp }}/juice-shop/measurement.*
+            ${{ runner.temp }}/juice-shop/runs/*/report.json
+            ${{ runner.temp }}/juice-shop/runs/*/requests.jsonl
+
+  crapi:
+    name: OWASP crAPI v1.1.6
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version-file: go.mod
+
+      - name: check out crAPI at v1.1.6
+        run: |
+          git clone --depth 1 --branch v1.1.6 https://github.com/OWASP/crAPI.git "$RUNNER_TEMP/crapi"
+          test "$(git -C "$RUNNER_TEMP/crapi" rev-parse HEAD)" = 700f03d12a392d9e408260b4beae72ed02a4a1a4
+
+      - name: boot it
+        working-directory: ${{ runner.temp }}/crapi/deploy/docker
+        # v1.1.6's own compose file runs VERSION=latest; each image is pinned
+        # here to the digest that tag carried for that release. The whole
+        # stack is started, as crAPI's own CI does: its web front proxies to
+        # the chatbot and does not start without it.
+        run: |
+          pin() { sed -i "s#image: crapi/$1:\${VERSION:-latest}#image: crapi/$1@$2#" docker-compose.yml; }
+          pin crapi-identity sha256:5d1db5b3ba8e02bc68711ec6fc4e35ed7cd8b87e63785ece9e7ff5b5e36c5260
+          pin crapi-community sha256:8ba0c7eda86ae065a673f1fa554d0109a24f25c5a8d65097ae024e5ee715c54e
+          pin crapi-workshop sha256:d4d2d94d35a31e211b04d5a771881f5ae13e358e8fa0804463ae3bace05dd815
+          pin crapi-chatbot sha256:36d274d54182a8baddba7ede17282035bb43ab9cb9cf87927e1fe7109901e0aa
+          pin crapi-web sha256:b27d246c646bd33898e7d1d2095b6e7576c0993a7b81a73aa7386929493d7151
+          pin mailhog sha256:015c23f79d40c9dc1800cd0a458503b89aeda3b585a12c37d53829d6c7d61fdd
+          pin gateway-service sha256:97dade9daf0e758547b1686e2d3303c8c9b79838167f728a9211f0ee1f4622b0
+          sed -i "s#image: 'postgres:14'#image: postgres@sha256:c0e9c0e9bac7e4c1834b698217a03ee5c708de30d313c84a506972de0e24b059#" docker-compose.yml
+          sed -i "s#image: 'mongo:4.4'#image: mongo@sha256:4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef#" docker-compose.yml
+          sed -i "s#image: 'chromadb/chroma:latest'#image: chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6#" docker-compose.yml
+          if grep -n 'image:' docker-compose.yml | grep -v '@sha256:'; then
+            echo "::error::an image was left unpinned"; exit 1; fi
+          LISTEN_IP=127.0.0.1 TLS_ENABLED=false docker compose -f docker-compose.yml --compatibility \
+            up -d --wait --wait-timeout 900
+
+      - name: learn Adam's order id, as an operator would
+        run: |
+          token=$(curl -fsS http://127.0.0.1:8888/identity/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"adam007@example.com","password":"adam007!123"}' | jq -r .token)
+          order=$(curl -fsS http://127.0.0.1:8888/workshop/api/shop/orders/all \
+            -H "Authorization: Bearer $token" | jq -r '.orders[0].id')
+          test -n "$order" && test "$order" != null
+          sed "s/__ADAM_ORDER_ID__/$order/" evals/mvp/crapi.sulayi.yaml > "$RUNNER_TEMP/crapi.sulayi.yaml"
+
+      - name: assess it three times
+        # The seeded accounts' credentials are published in crAPI's own source
+        # (TestUsers.java); they are a demo application's.
+        run: |
+          go build -o sulayi ./cmd/sulayi
+          cat > "$RUNNER_TEMP/crapi.env" <<'ENV'
+          CRAPI_ADMIN_EMAIL=admin@example.com
+          CRAPI_ADMIN_PASSWORD=Admin!123
+          CRAPI_ADAM_EMAIL=adam007@example.com
+          CRAPI_ADAM_PASSWORD=adam007!123
+          CRAPI_TEST_EMAIL=test@example.com
+          CRAPI_TEST_PASSWORD=Test!123
+          ENV
+          chmod 600 "$RUNNER_TEMP/crapi.env"
+          for n in 1 2 3; do
+            ./sulayi attack -c "$RUNNER_TEMP/crapi.sulayi.yaml" \
+              --spec "$RUNNER_TEMP/crapi/openapi-spec/crapi-openapi-spec.json" \
+              --env "$RUNNER_TEMP/crapi.env" -o "$RUNNER_TEMP/crapi-runs" || true
+          done
+
+      - name: measure
+        run: |
+          set -o pipefail
+          go run ./evals/mvp/measure -target crapi -expected evals/mvp/crapi.expected.yaml -commit "$GITHUB_SHA" \
+            -json "$RUNNER_TEMP/crapi-runs/measurement.json" \
+            $(ls -d "$RUNNER_TEMP"/crapi-runs/runs/*/ | sort) | tee "$RUNNER_TEMP/crapi-runs/measurement.md"
+          cat "$RUNNER_TEMP/crapi-runs/measurement.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: crapi
+          path: |
+            ${{ runner.temp }}/crapi-runs/measurement.*
+            ${{ runner.temp }}/crapi-runs/runs/*/report.json
+            ${{ runner.temp }}/crapi-runs/runs/*/requests.jsonl

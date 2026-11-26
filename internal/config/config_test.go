@@ -571,6 +571,8 @@ func TestStateChangingOperationsMustNameAMethodAndPath(t *testing.T) {
 // here.
 func TestReferenceConfigurationsAreValid(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join("..", "..", "evals", "reference", "*.sulayi.yaml"))
+	mvp, _ := filepath.Glob(filepath.Join("..", "..", "evals", "mvp", "*.sulayi.yaml"))
+	files = append(files, mvp...)
 	if len(files) == 0 {
 		t.Fatal("no reference configuration found")
 	}

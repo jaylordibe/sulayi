@@ -1,0 +1,55 @@
+# MVP measurement configuration for OWASP Juice Shop v20.4.0 (ADR-0025): what
+# an operator would write for it. Juice Shop is a single-page application with
+# no specification of its API, so its surface is the browser recording beside
+# this file (juice-shop.har, reduced to methods and URLs):
+#
+#   sulayi attack -c evals/mvp/juice-shop.sulayi.yaml --har evals/mvp/juice-shop.har \
+#     --env <credentials file>
+#
+# The accounts are Juice Shop's seeded ones (data/static/users.yml). The
+# administrators' own user and sign-in lists are declared admin-only: the
+# application's administration page reads them.
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://127.0.0.1:3000
+identities:
+  - id: admin
+    role: admin
+    authentication:
+      type: login
+      login:
+        path: /rest/user/login
+        body:
+          email: { env: JUICE_ADMIN_EMAIL }
+          password: { env: JUICE_ADMIN_PASSWORD }
+        session:
+          bearer: /authentication/token
+    liveness: { method: GET, path: /api/Cards }
+  - id: jim
+    role: customer
+    authentication:
+      type: login
+      login:
+        path: /rest/user/login
+        body:
+          email: { env: JUICE_JIM_EMAIL }
+          password: { env: JUICE_JIM_PASSWORD }
+        session:
+          bearer: /authentication/token
+    liveness: { method: GET, path: /api/Cards }
+  - id: bender
+    role: customer
+    authentication:
+      type: login
+      login:
+        path: /rest/user/login
+        body:
+          email: { env: JUICE_BENDER_EMAIL }
+          password: { env: JUICE_BENDER_PASSWORD }
+        session:
+          bearer: /authentication/token
+    liveness: { method: GET, path: /api/Cards }
+access:
+  roles:
+    - paths: ["/api/Users", "/rest/user/authentication-details"]
+      allow: [admin]

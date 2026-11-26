@@ -1,0 +1,74 @@
+# MVP measurement configuration for OWASP crAPI v1.1.6 (ADR-0025): what an
+# operator would write for it from its own documentation and seed data.
+#
+#   sulayi attack -c evals/mvp/crapi.sulayi.yaml --spec <crapi-openapi-spec.json> \
+#     --env <credentials file>
+#
+# The accounts are crAPI's seeded ones (TestUsers.java). The liveness route is
+# one that refuses a dead session with 401: the dashboard deliberately does not
+# check token signatures, which is one of crAPI's challenges. The vehicle id is
+# Adam's seeded car; __ADAM_ORDER_ID__ is replaced by the measurement workflow
+# with the id of Adam's seeded order, read from Adam's own order list, which is
+# how an operator would learn it.
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://127.0.0.1:8888
+discovery:
+  probeWellKnownPaths: false
+identities:
+  - id: admin
+    role: admin
+    authentication:
+      type: login
+      login:
+        path: /identity/api/auth/login
+        body:
+          email: { env: CRAPI_ADMIN_EMAIL }
+          password: { env: CRAPI_ADMIN_PASSWORD }
+        session:
+          bearer: /token
+    liveness: { method: GET, path: /identity/api/v2/vehicle/vehicles }
+  - id: adam
+    role: user
+    authentication:
+      type: login
+      login:
+        path: /identity/api/auth/login
+        body:
+          email: { env: CRAPI_ADAM_EMAIL }
+          password: { env: CRAPI_ADAM_PASSWORD }
+        session:
+          bearer: /token
+    liveness: { method: GET, path: /identity/api/v2/vehicle/vehicles }
+  - id: test
+    role: user
+    authentication:
+      type: login
+      login:
+        path: /identity/api/auth/login
+        body:
+          email: { env: CRAPI_TEST_EMAIL }
+          password: { env: CRAPI_TEST_PASSWORD }
+        session:
+          bearer: /token
+    liveness: { method: GET, path: /identity/api/v2/vehicle/vehicles }
+resources:
+  - id: adam-vehicle
+    type: vehicle
+    owner: adam
+    crossOwnerAccess: denied
+    values:
+      vehicleId: f89b5f21-7829-45cb-a650-299a61090378
+    nonOwners: [test]
+  - id: adam-order
+    type: order
+    owner: adam
+    crossOwnerAccess: denied
+    values:
+      order_id: "__ADAM_ORDER_ID__"
+    operations: ["GET /workshop/api/shop/orders/{order_id}"]
+    nonOwners: [test]
+access:
+  roles:
+    - paths: ["/workshop/api/management/**"]
+      allow: [admin]
