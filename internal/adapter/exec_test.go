@@ -330,3 +330,18 @@ func TestCollectHandlesCancellation(t *testing.T) {
 		t.Errorf("failures = %v", c.Failures)
 	}
 }
+
+// A relative adapter path is the operator's path, relative to where Sulayi was
+// started. The adapter runs inside the source root, so resolving the path
+// there instead would look for the operator's binary inside the target's
+// checkout, and a bare name would be searched for on PATH.
+func TestRelativeAdapterPathResolvesFromTheWorkingDirectory(t *testing.T) {
+	bin := buildAdapter(t, "adapter", adapterPreamble+"fmt.Print(`"+validDoc+"`)\n}\n")
+	t.Chdir(filepath.Dir(bin))
+	for _, path := range []string{"./" + filepath.Base(bin), filepath.Base(bin)} {
+		spec := Spec{Name: "probe", Path: path, SourceRoot: t.TempDir(), Timeout: 20 * time.Second}
+		if out := Run(context.Background(), spec, Options{Trust: TrustNone}); out.Err != nil {
+			t.Errorf("path %q: %v", path, out.Err)
+		}
+	}
+}

@@ -71,8 +71,9 @@ func (t TrustMode) Permits(m ExtractionMethod) bool {
 type Spec struct {
 	// Name identifies the adapter in the ledger and reports.
 	Name string
-	// Path is the adapter executable. It is used verbatim as argv[0]; nothing
-	// here is ever passed through a shell.
+	// Path is the adapter executable. A relative path is relative to the
+	// working directory Sulayi was started in, never the source root and never
+	// PATH. Nothing here is ever passed through a shell.
 	Path string
 	// Args are additional arguments, supplied by the operator.
 	Args []string
@@ -147,13 +148,21 @@ func Run(ctx context.Context, spec Spec, opts Options) Outcome {
 		return finish(err)
 	}
 	spec.SourceRoot = root
+	// Resolved before the adapter's working directory becomes the source root:
+	// exec resolves a relative path against that directory, which would look
+	// for the operator's binary inside the target's checkout, and a bare name
+	// would be searched for on PATH.
+	bin, err := filepath.Abs(spec.Path)
+	if err != nil {
+		return finish(fmt.Errorf("adapter path is not usable: %w", err))
+	}
 
 	// Supervision is shared with the external-engine boundary (internal/proc).
 	// Two implementations of process-group cleanup and pipe draining would be
 	// two chances to get it wrong, and the failure mode is an orphaned process.
 	run, runErr := proc.Run(ctx, proc.Spec{
 		Name:      "adapter " + spec.Name,
-		Path:      spec.Path,
+		Path:      bin,
 		Args:      append([]string{"--source-root", spec.SourceRoot}, spec.Args...),
 		Dir:       spec.SourceRoot,
 		Env:       proc.MinimalEnv(spec.PassEnv, opts.ForbiddenEnv),
