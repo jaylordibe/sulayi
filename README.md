@@ -141,7 +141,7 @@ compare against. [Add identities](#identities) and the same defect can be confir
 | Signing in through the app's own login: bearer token or cookie session (with CSRF), `--env` credentials files, roles, bounded re-authentication | Implemented — bearer logins are run against the Laravel Passport and NestJS JWT reference starters by the reference workflow; cookie sessions and CSRF are tested on local fixtures only |
 | Testing across accounts and roles from records Sulayi creates and deletes itself, against declared ownership and role rules | Implemented — validated on local fixtures; the reference-starter run is pending |
 | Testing applications without an OpenAPI document: framework adapters, browser recordings (HAR, discovery only) and a bounded same-origin crawler, with a declared access policy as the oracle | Implemented — the crawler reads server-rendered links only; a single-page app's API comes from a HAR |
-| Injection and misconfiguration checks | Planned |
+| Injection and misconfiguration checks: boolean SQL injection, reflected XSS, template injection, open redirect, credentialed CORS, stack-trace disclosure — GET query and path parameters only | Implemented — validated on paired local fixtures |
 | `sulayi report`, `sulayi verify <finding-id>` | Planned |
 
 ---
@@ -316,6 +316,18 @@ A path no rule declares gets no conclusion. Under `standard`, the only state-cha
 requests are each declared creation and the deletion of exactly what it created; `safe`
 creates nothing. Every record is listed in the report, and one not removed is reported as
 incomplete cleanup with its address. Routes are compared across roles with GET only.
+
+### Injection and misconfiguration
+
+Every GET operation's query and path parameters are tried with payloads from one closed
+catalogue ([ADR-0023](docs/adr/0023-injection-and-misconfiguration-checks.md)). Each check
+confirms only on an observation that cannot happen by chance: two independent SQL
+true/false condition pairs steering the response, a unique tag returned unencoded in
+HTML, `7*7919` rendered as `55433`, a `Location` naming a reserved `.invalid` host, an
+arbitrary origin echoed with credentials allowed for a cookie session, or stack frames a
+malformed value produced. `safe` sends only inert payloads; SQL conditions and template expressions need
+`standard` and are sent only in reads, which the HTTP client enforces by recognising them
+in the request. Request bodies are not tested yet, and the report says so.
 
 ---
 

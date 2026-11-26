@@ -156,6 +156,13 @@ type Control struct {
 // ID returns the identity id.
 func (c *Control) ID() string { return c.id.ID }
 
+// Ambient reports whether the identity's credential is one a browser attaches
+// by itself — a cookie session — rather than a header the caller sets. Only an
+// ambient credential reaches a cross-origin request.
+func (c *Control) Ambient() bool {
+	return c.id.Auth.Scheme == SchemeLogin && c.id.Auth.Login != nil && c.id.Auth.Login.Session.Cookies
+}
+
 // Role returns the identity's configured role, or "" when none is.
 func (c *Control) Role() string { return c.id.Role }
 

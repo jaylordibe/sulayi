@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/payload"
 )
 
 // ErrRefused reports that the safety guard refused a request before anything
@@ -324,6 +325,33 @@ func (g *Guard) check(method, rawURL string, body []byte, authentication bool) e
 	default:
 		return refuse(fmt.Sprintf("state-changing request under the %s profile", profile))
 	}
+}
+
+// checkPayload refuses a request carrying a catalogued payload whose impact
+// class the profile does not permit (ADR-0023). The payload is recognised in the
+// request itself, never taken from the sender's description of it. Inert
+// payloads go anywhere; evaluating and query-altering ones only in a read
+// (GET or HEAD) and never under safe. A nil guard behaves as safe.
+func (g *Guard) checkPayload(method, rawURL string, header map[string][]string, body []byte) error {
+	p, ok := payload.Find(rawURL, header, body)
+	if !ok {
+		return nil
+	}
+	method = strings.ToUpper(strings.TrimSpace(method))
+	profile := model.ProfileSafe
+	if g != nil {
+		profile = g.profile
+	}
+	refuse := func(reason string) error {
+		return &ErrRefused{Method: method, Target: rawURL, Reason: reason}
+	}
+	if profile == model.ProfileSafe {
+		return refuse(fmt.Sprintf("payload %s is %s, which the safe profile does not send", p.ID, p.Class))
+	}
+	if method != http.MethodGet && method != http.MethodHead {
+		return refuse(fmt.Sprintf("payload %s is %s, which is sent only in a read (GET or HEAD)", p.ID, p.Class))
+	}
+	return nil
 }
 
 // grantKey canonicalises a request target for exact comparison: scheme and host

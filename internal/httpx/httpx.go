@@ -578,7 +578,11 @@ func (c *Client) do(ctx context.Context, r Request, raw *AuthResponse) (model.Ex
 
 	// The safety guard runs first: a refused request sends nothing, waits for
 	// nothing and consumes nothing.
-	if err := c.opts.Guard.check(captured.Method, r.URL, r.Body, r.authentication); err != nil {
+	err := c.opts.Guard.check(captured.Method, r.URL, r.Body, r.authentication)
+	if err == nil {
+		err = c.opts.Guard.checkPayload(captured.Method, r.URL, r.Header, r.Body)
+	}
+	if err != nil {
 		var refused *ErrRefused
 		if errors.As(err, &refused) {
 			refused.Target = c.red.URL(refused.Target)

@@ -211,8 +211,10 @@ func TestScanProducesReportAndLedger(t *testing.T) {
 	if doc["schemaVersion"] == nil {
 		t.Error("report has no schemaVersion")
 	}
-	if rows, _ := doc["coverage"].([]any); len(rows) != 2 {
-		t.Errorf("coverage rows = %d, want 2", len(rows))
+	// One row per operation for each of the seven operation checks: every
+	// check accounts for every operation, run or not.
+	if rows, _ := doc["coverage"].([]any); len(rows) != 2*7 {
+		t.Errorf("coverage rows = %d, want %d", len(rows), 2*7)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(matches[0]), "report.sarif")); err != nil {
 		t.Errorf("SARIF not written: %v", err)

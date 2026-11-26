@@ -5,12 +5,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/payload"
 )
 
 // guardFixture is a target that counts every request it receives, so a test can
@@ -390,4 +392,29 @@ func TestAggressiveDoesNotRecordOneShotGrants(t *testing.T) {
 			t.Fatalf("create grant %d: %v", i+1, err)
 		}
 	}
+}
+
+// A payload's class is read from the request, not from whoever sends it:
+// safe sends only inert payloads, and no profile sends a query-altering or
+// evaluating one in anything but a read.
+func TestPayloadClassIsEnforcedFromTheRequestItself(t *testing.T) {
+	sqlTrue := "/api/items?id=" + url.QueryEscape("1"+payload.SQLStringTrue1.Value)
+	ssti := "/api/items?q=" + url.QueryEscape(payload.Templates[0].Value)
+	marker := "/api/items?q=" + url.QueryEscape(payload.XSSMarker.Value)
+
+	safe, _ := NewGuard(model.ProfileSafe, nil)
+	fs := newGuardFixture(t, safe)
+	fs.expectRefused(t, http.MethodGet, sqlTrue, "")
+	fs.expectRefused(t, http.MethodGet, ssti, "")
+	fs.expectSent(t, http.MethodGet, marker, "")
+
+	std, _ := NewGuard(model.ProfileStandard, nil)
+	fstd := newGuardFixture(t, std)
+	fstd.expectSent(t, http.MethodGet, sqlTrue, "")
+	fstd.expectSent(t, http.MethodGet, ssti, "")
+
+	agg, _ := NewGuard(model.ProfileAggressive, nil)
+	fagg := newGuardFixture(t, agg)
+	fagg.expectRefused(t, http.MethodPost, "/api/items", `{"id":"1`+strings.ReplaceAll(payload.SQLNumberTrue1.Value, `"`, `\"`)+`"}`)
+	fagg.expectSent(t, http.MethodPost, "/api/items", `{"id":"1"}`)
 }

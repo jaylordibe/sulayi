@@ -1371,6 +1371,55 @@ to change or destroy data, or to report a boundary that was never tested. See
 identities of different roles, so a role in `reachableBy` leaves one direction.
 An application whose delete is soft keeps a row its API reports as gone.
 
+### T-26 Injection payloads (S4)
+
+S4 sends payloads built to make a vulnerable application do something it should
+not. A payload that does more than prove the flaw, or a check that reports a
+flaw that is not there, would each defeat the point. See
+[ADR-0023](../adr/0023-injection-and-misconfiguration-checks.md).
+
+- **A payload's class is enforced in the client, from the request.** Every
+  payload is in a closed catalogue; the client recognises any non-inert one in an
+  outgoing path, query, header or body and refuses it under `safe`, and in
+  anything but a GET or HEAD under every profile. A check never states its own
+  payload's class. **TESTED** (`httpx.TestPayloadClassIsEnforcedFromTheRequestItself`,
+  `payload.TestFindRecognisesNonInertPayloadsWhereverTheyAre`,
+  `evals.TestS4_SafeProfileSendsOnlyInertPayloads`).
+- **Nothing destructive exists to send.** The catalogue holds no stacked query, no
+  data-changing SQL and no delay; SQL payloads are boolean conditions only. A GET
+  route whose vulnerable statement writes would still store a condition's value,
+  which is accepted under `standard` and stated in ADR-0023. **IMPLEMENTED**
+  (`internal/payload`).
+- **No result rests on a request that could not have shown anything.** With an
+  identity configured and unusable, nothing is sent anonymously; a baseline
+  answered 401 or 403 blocks the row; a check that put its payload into no
+  parameter reports untested; a weakness class counts as assessed only when its
+  check executed. **TESTED** (`evals.TestS4_UnusableIdentityBlocksRatherThanProbingAnonymously`,
+  `evals.TestS4_ABlockedCheckDoesNotCountAsAssessed`).
+- **Evidence does not carry the target's secrets.** A debug page that disclosed
+  a stack trace is stored as its matched frames only. **TESTED**
+  (`evals.TestS4_StackTraceEvidenceKeepsFramesNotSecrets`).
+- **A finding needs an observation that cannot be coincidence.** SQL injection
+  needs a stable baseline and two independent true/false pairs; XSS a unique tag
+  unencoded in HTML markup after its quote breakout; template injection two
+  products absent from both baselines; a redirect a reserved `.invalid` host;
+  CORS an arbitrary origin echoed with credentials, for a cookie session; a
+  stack trace runtime frames, never a framework's name. Secure variants that validate, cast or parameterise produce nothing.
+  **TESTED** (`evals.TestS4_VulnerableApplicationIsConfirmedByEveryCheck`,
+  `evals.TestS4_SecureApplicationIsReportedByNoCheck`,
+  `evals.TestS4_ReflectionInsideAScriptIsOnlySuspected`,
+  `evals.TestS4_ReflectionInsideAQuotedAttributeIsOnlySuspected`,
+  `evals.TestS4_CredentialedCORSNeedsAnAmbientCredential`,
+  `check.TestNormalisedRemovesEscapedEchoes`,
+  `check.TestStackSignaturesMatchFramesNotNames`, `check.TestRawTextContexts`).
+- **No probe reaches a third party.** Redirect and CORS probes name hosts under
+  `.invalid`, which cannot resolve; redirects are never followed; scope applies.
+  **TESTED** (`evals.TestS4_VulnerableApplicationIsConfirmedByEveryCheck`).
+
+**Limits.** Request bodies, headers other than `Origin`, and non-GET operations
+are not injected into, and the report's not-assessed list says so. Markers carry
+`sulayi`, so they are visible in the target's logs.
+
 ## 3. Residual risk accepted at this stage
 
 Stated plainly rather than left for a reader to discover.

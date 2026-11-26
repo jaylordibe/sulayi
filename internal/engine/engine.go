@@ -673,7 +673,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		res.CleanupIncomplete = append(res.CleanupIncomplete, f)
 	}
 	res.ClassesNotAssessed = removeEngineCovered(
-		qualifyOwnershipClasses(classesNotAssessed(opts.Checks), res.Ownership),
+		qualifyRoleClasses(qualifyOwnershipClasses(classesNotAssessed(res.Coverage), res.Ownership), res.Coverage),
 		opts.Engines)
 	res.FinishedAt = opts.Now()
 
@@ -733,6 +733,17 @@ func findingID(checkID, operationID string) string {
 // assessedClasses maps a check to the weakness classes it covers.
 var assessedClasses = map[string][]string{
 	check.AuthRequiredID: {"CWE-306"},
+	check.SQLInjectionID: {"CWE-89"},
+	check.ReflectedXSSID: {"CWE-79"},
+}
+
+// partlyAssessed qualifies a class a check covers only in part, so the list
+// says what was not looked at instead of dropping the class (ADR-0023).
+var partlyAssessed = map[string]string{
+	"CWE-89": " — assessed only in query and path parameters of GET operations; request bodies, " +
+		"headers and other methods were not tested",
+	"CWE-79": " — reflected only, in query and path parameters of GET operations; stored and " +
+		"DOM-based XSS and request bodies were not tested",
 }
 
 // notableClasses are weakness classes a reader of a security report will
@@ -752,20 +763,53 @@ var notableClasses = []string{
 	"multi-tenant isolation",
 }
 
-// classesNotAssessed lists what nothing in this run looked at.
-func classesNotAssessed(checks []Check) []string {
+// classesNotAssessed lists what nothing in this run looked at. A class counts
+// as looked at only when its check executed on at least one operation: a
+// check that was registered and then blocked by the profile, or that found
+// nothing to run on, assessed nothing.
+func classesNotAssessed(coverage []model.CoverageEntry) []string {
 	covered := map[string]bool{}
-	for _, c := range checks {
-		for _, cls := range assessedClasses[c.Metadata().ID] {
+	for _, e := range coverage {
+		if e.Disposition != model.DispositionExecuted {
+			continue
+		}
+		for _, cls := range assessedClasses[e.CheckID] {
 			covered[cls] = true
 		}
 	}
 	var out []string
 	for _, cls := range notableClasses {
 		key := strings.SplitN(cls, " ", 2)[0]
-		if !covered[key] {
+		switch q, partial := partlyAssessed[key]; {
+		case !covered[key]:
 			out = append(out, cls)
+		case partial:
+			out = append(out, cls+q)
 		}
+	}
+	return out
+}
+
+// qualifyRoleClasses annotates function-level authorization once cross-role
+// work has run, for the same reason ownership classes are qualified: the
+// routes tested are the declared ones, not the application.
+func qualifyRoleClasses(classes []string, coverage []model.CoverageEntry) []string {
+	var n int
+	for _, e := range coverage {
+		if e.Dimension == DimensionRole && e.Disposition == model.DispositionExecuted {
+			n++
+		}
+	}
+	if n == 0 {
+		return classes
+	}
+	out := make([]string, 0, len(classes))
+	for _, c := range classes {
+		if strings.HasPrefix(c, "CWE-285 ") {
+			c += fmt.Sprintf(" — assessed only for the %d cross-role read(s) under access.roles; not for "+
+				"any other route, role or method", n)
+		}
+		out = append(out, c)
 	}
 	return out
 }

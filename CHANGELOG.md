@@ -35,6 +35,16 @@ consumer can detect a change rather than misparse.
 
 ### Added
 
+- **Injection and misconfiguration checks**
+  ([ADR-0023](docs/adr/0023-injection-and-misconfiguration-checks.md)):
+  `sql-injection-boolean`, `reflected-xss`, `template-injection`, `open-redirect`,
+  `cors-credentialed-origin` and `stack-trace-disclosure`, in query and path parameters of
+  GET operations. Every payload is in a closed catalogue with an impact class (inert,
+  evaluating, query-altering) that the HTTP client enforces by recognising the payload in
+  the request: `safe` sends inert payloads only, and no profile sends the others outside a
+  GET or HEAD. The not-assessed list now qualifies SQL injection, XSS and function-level
+  authorization by what was actually tested instead of listing or dropping them whole.
+
 - **Authorization across accounts and roles**
   ([ADR-0022](docs/adr/0022-authorization-across-accounts-and-roles.md)). `records[]`
   declares how to create a record; Sulayi creates one as each identity, probes it from the

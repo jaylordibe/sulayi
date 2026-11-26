@@ -574,6 +574,7 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 
 	fixtures := append(cfg.ResourceFixtures(), record.Fixtures(created, surface.Operations, rules, identities)...)
 
+	inj := check.Injection{Client: client, Control: identities.Primary(), Resources: fixtures, Now: now}
 	checks := []engine.Check{
 		check.AuthRequired{
 			Client:         client,
@@ -583,6 +584,12 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 			Control:        identities.Primary(),
 			Now:            now,
 		},
+		check.SQLInjection{Injection: inj},
+		check.ReflectedXSS{Injection: inj},
+		check.TemplateInjection{Injection: inj},
+		check.OpenRedirect{Injection: inj},
+		check.StackTrace{Injection: inj},
+		check.CORSCredentialed{Injection: inj},
 	}
 
 	if len(fixtures) > 0 && identities.Len() < 2 {
