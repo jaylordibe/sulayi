@@ -256,3 +256,20 @@ func TestWritesAreAtomic(t *testing.T) {
 		}
 	}
 }
+
+// Two runs started in the same second are ordered by when each was created,
+// not by the random suffix of their ids.
+func TestRunsAreNewestFirstWithinOneSecond(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	if _, err := Create(root, "20261126T120000Z-ffffffff", base); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(root, "20261126T120000Z-00000000", base.Add(300*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	runs := Runs(root)
+	if len(runs) != 2 || filepath.Base(runs[0]) != "20261126T120000Z-00000000" {
+		t.Errorf("runs = %v, want the later-created run first", runs)
+	}
+}

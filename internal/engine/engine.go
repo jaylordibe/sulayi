@@ -186,6 +186,28 @@ type Options struct {
 	EvidenceSink func(model.Exchange) (string, error)
 }
 
+// Verdict is what re-running a finding established (ADR-0024).
+type Verdict string
+
+const (
+	// VerdictReproduced means the same check found it again.
+	VerdictReproduced Verdict = "reproduced"
+	// VerdictFixed means the unit executed and produced no finding.
+	VerdictFixed Verdict = "fixed"
+	// VerdictInconclusive means the unit did not execute, so nothing was
+	// established either way.
+	VerdictInconclusive Verdict = "inconclusive"
+)
+
+// Verification links a re-run to the finding it re-ran.
+type Verification struct {
+	OfRun     string
+	OfFinding string
+	Ref       string
+	Verdict   Verdict
+	Detail    string
+}
+
 // RecordOutcome is one record the run created, or tried to, and what became
 // of it.
 type RecordOutcome struct {
@@ -224,6 +246,8 @@ type Result struct {
 	// separate from ToolFailures because it is not about coverage: somebody's
 	// data may still be wrong.
 	CleanupIncomplete []string
+	// Verification is set when this run re-ran one earlier finding.
+	Verification *Verification
 	// Records lists every record the run created, or tried to, as its
 	// identities, and whether each was removed (ADR-0022).
 	Records []RecordOutcome
@@ -539,6 +563,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			if out.Finding != nil {
 				f := *out.Finding
 				f.ID = findingID(meta.ID, j.op.ID)
+				f.Recipe = &model.Recipe{CheckID: meta.ID, Operation: model.RecipeOperationOf(j.op)}
 				if len(f.EvidenceRefs) == 0 {
 					f.EvidenceRefs = refs
 				}
@@ -617,6 +642,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			if out.Finding != nil {
 				f := *out.Finding
 				f.ID = ownershipFindingID(meta.ID, u.plan)
+				f.Recipe = unitRecipe(meta.ID, u.plan)
 				if len(f.EvidenceRefs) == 0 {
 					f.EvidenceRefs = refs
 				}
@@ -1030,6 +1056,20 @@ func windowEndLabel(w identity.Window) string {
 		return ""
 	}
 	return " and before it signed in again and was confirmed good at " + w.To.UTC().Format(time.RFC3339)
+}
+
+// unitRecipe records a cross-owner or cross-role unit for a re-run.
+func unitRecipe(checkID string, p check.ResourcePlan) *model.Recipe {
+	r := &model.Recipe{CheckID: checkID, Operation: model.RecipeOperationOf(p.Operation),
+		IdentityID: attackerID(p)}
+	if p.Owner != nil {
+		r.OwnerIdentityID = p.Owner.ID()
+	}
+	if p.Fixture.ID != "" {
+		r.Fixture = &model.RecipeFixture{ID: p.Fixture.ID, Type: p.Fixture.Type, Owner: p.Fixture.Owner,
+			Provenance: string(p.Fixture.Provenance)}
+	}
+	return r
 }
 
 // ownershipFindingID builds a stable identifier for a cross-owner finding.

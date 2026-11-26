@@ -378,3 +378,30 @@ func sortedHeader(h map[string][]string) map[string][]string {
 	}
 	return out
 }
+
+// Runs lists the run directories under root, newest first by the creation
+// time each recorded. Run ids carry only the second and a random suffix, so
+// two runs started in the same second cannot be ordered by name.
+func Runs(root string) []string {
+	matches, _ := filepath.Glob(filepath.Join(root, "runs", "*"))
+	var dirs []string
+	for _, m := range matches {
+		if info, err := os.Stat(m); err == nil && info.IsDir() {
+			dirs = append(dirs, m)
+		}
+	}
+	created := make(map[string]time.Time, len(dirs))
+	for _, d := range dirs {
+		var m Meta
+		if raw, err := os.ReadFile(filepath.Join(d, "meta.json")); err == nil && json.Unmarshal(raw, &m) == nil {
+			created[d] = m.CreatedAt
+		}
+	}
+	sort.SliceStable(dirs, func(i, j int) bool {
+		if !created[dirs[i]].Equal(created[dirs[j]]) {
+			return created[dirs[i]].After(created[dirs[j]])
+		}
+		return dirs[i] > dirs[j]
+	})
+	return dirs
+}

@@ -1420,6 +1420,38 @@ flaw that is not there, would each defeat the point. See
 are not injected into, and the report's not-assessed list says so. Markers carry
 `sulayi`, so they are visible in the target's logs.
 
+### T-27 Verifying a finding (S5)
+
+`sulayi verify` reads a recipe from a report on disk and sends requests because
+of it. A report is a file anyone can edit, and a verdict of "fixed" is the most
+quotable thing the tool says. See [ADR-0024](../adr/0024-verify-a-finding-from-its-recipe.md).
+
+- **A recipe is input, not authority.** One whose path is not a plain path is
+  refused; every request it causes goes through the configured scope, guard,
+  payload classes and budget, as in `attack`. **TESTED**
+  (`cli.TestS5_AnEditedRecipeCannotLeaveTheTarget`).
+- **A recipe carries no credential.** Identities appear by id; credentials come
+  from the configuration at the time of the re-run. **TESTED**
+  (`cli.TestLoginThroughEnvFileLeavesNoSecretAnywhere`, which searches every file
+  under `.sulayi/`, report and recipes included).
+- **Fixed is earned, never defaulted.** A verdict of fixed needs the unit to have
+  executed and produced nothing, and the operation to still answer a signed-in
+  GET as the baseline identity, not as a catch-all; an identity that cannot sign
+  in, a moved route, a state-changing operation check or a blocked unit is
+  inconclusive. A recipe's id must be the one its method and path produce, so
+  exclusions still apply. **TESTED** (`cli.TestS5_VerifySaysFixedAfterAFixAndReproducedWithout`,
+  `cli.TestS5_AnUnusableIdentityIsInconclusiveNotFixed`,
+  `cli.TestS5_AMovedRouteIsInconclusiveNotFixed`,
+  `cli.TestS5_AMovedRouteBehindACatchAllIsInconclusive`,
+  `cli.TestS5_TheRouteCheckAsksAsTheOwner`).
+- **Nothing from the earlier run is used but the recipe.** No evidence, session or
+  request log is read. **TESTED** (`cli.TestS5_VerifyReadsOnlyTheRecipe`, which
+  makes them unreadable first).
+- **The right finding is re-run.** Runs are searched newest first by recorded
+  creation time, and a ref matching two different findings is refused.
+  **TESTED** (`store.TestRunsAreNewestFirstWithinOneSecond`,
+  `cli.TestS5_ReportPrintsRefsAndVerifyRefusesAnUnknownOne`).
+
 ## 3. Residual risk accepted at this stage
 
 Stated plainly rather than left for a reader to discover.

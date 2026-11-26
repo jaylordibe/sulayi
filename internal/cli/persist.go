@@ -13,6 +13,14 @@ import (
 
 // persistAndSummarize writes the run artefacts and chooses the exit code.
 func persistAndSummarize(res engine.Result, run *store.Run, pol config.Policy, stdout, stderr io.Writer) error {
+	if err := persistArtifacts(res, run, stdout, stderr); err != nil {
+		return err
+	}
+	return exitFor(res, pol, stderr)
+}
+
+// persistArtifacts writes the report and SARIF and prints the summary.
+func persistArtifacts(res engine.Result, run *store.Run, stdout, stderr io.Writer) error {
 	// resolveVersion, not the raw linked variable: a binary from
 	// `go install ...@v0.1.0` never sees the Makefile, so the linked value stays
 	// at its development default. Every report it wrote would then claim to have
@@ -39,6 +47,11 @@ func persistAndSummarize(res engine.Result, run *store.Run, pol config.Policy, s
 			"see the summary above and cleanupIncomplete in the report.\n", n)
 	}
 
+	return nil
+}
+
+// exitFor chooses an assessment's exit code.
+func exitFor(res engine.Result, pol config.Policy, stderr io.Writer) error {
 	// An assessment that executed nothing establishes nothing, and must not
 	// return the same code as one that ran cleanly.
 	if res.ExecutedCount() == 0 && res.StoppedEarly == "" {

@@ -35,6 +35,15 @@ consumer can detect a change rather than misparse.
 
 ### Added
 
+- **`sulayi verify <finding>` and `sulayi report`**
+  ([ADR-0024](docs/adr/0024-verify-a-finding-from-its-recipe.md)). Every finding Sulayi
+  produces carries a recipe and a short ref; `verify` re-runs that one check on that one
+  operation through the ordinary pipeline, with fresh sign-ins and the current
+  configuration, as a new run linked to the original, and reports **reproduced** (exit 1),
+  **fixed** (exit 0) or **inconclusive** (exit 3). A route that no longer answers a
+  signed-in GET is inconclusive, never fixed. `report` prints a stored run's summary and
+  findings offline. The report schema is now `sulayi.report/v1alpha2`.
+
 - **Injection and misconfiguration checks**
   ([ADR-0023](docs/adr/0023-injection-and-misconfiguration-checks.md)):
   `sql-injection-boolean`, `reflected-xss`, `template-injection`, `open-redirect`,

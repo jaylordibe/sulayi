@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,11 +29,22 @@ type notesApp struct {
 	failDelete bool
 	// noRead makes a note unreadable, so a removal cannot be verified.
 	noRead bool
+	// moved removes the count route, as a later version of the application
+	// might; catchAll answers every unknown path with the same page, as a
+	// single-page application's fallback does.
+	moved, catchAll bool
 
 	mu       sync.Mutex
 	notes    map[string]map[string]any
 	next     int
 	requests []string
+}
+
+// setVulnerable switches the defect on or off between runs, as a fix would.
+func (a *notesApp) setVulnerable(v bool) {
+	a.mu.Lock()
+	a.vulnerable = v
+	a.mu.Unlock()
 }
 
 func newNotesApp(vulnerable bool) *notesApp {
@@ -68,16 +80,50 @@ func (a *notesApp) handler() http.Handler {
 		a.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		who, role := a.caller(r)
+		a.mu.Lock()
+		vulnerable, moved, catchAll := a.vulnerable, a.moved, a.catchAll
+		a.mu.Unlock()
+		known := strings.HasPrefix(r.URL.Path, "/api/notes") || r.URL.Path == "/api/me" ||
+			strings.HasPrefix(r.URL.Path, "/api/admin")
+		if (moved && r.URL.Path == "/api/notes/count") || (catchAll && !known) {
+			if catchAll {
+				w.Header().Set("Content-Type", "text/html")
+				_, _ = w.Write([]byte("<html><body>app shell</body></html>"))
+				return
+			}
+			w.WriteHeader(404)
+			return
+		}
+		if r.URL.Path == "/api/notes/count" && (who != "" || vulnerable) {
+			_, _ = w.Write([]byte(`{"count":12}`))
+			return
+		}
+		if who == "" && vulnerable && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/notes/n") {
+			a.mu.Lock()
+			note, ok := a.notes[strings.TrimPrefix(r.URL.Path, "/api/notes/")]
+			a.mu.Unlock()
+			if ok {
+				_ = json.NewEncoder(w).Encode(note)
+				return
+			}
+		}
 		if who == "" {
 			w.WriteHeader(401)
 			_, _ = w.Write([]byte(`{"message":"unauthenticated"}`))
 			return
 		}
 		switch {
+		case r.URL.Path == "/api/notes/search" && r.Method == http.MethodGet:
+			q := r.URL.Query().Get("q")
+			if !vulnerable {
+				q = html.EscapeString(q)
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprintf(w, "<html><body><p>Notes matching %s</p></body></html>", q)
 		case r.URL.Path == "/api/me" && r.Method == http.MethodGet:
 			_, _ = fmt.Fprintf(w, `{"id":%q,"role":%q}`, who, role)
 		case r.URL.Path == "/api/admin/stats" && r.Method == http.MethodGet:
-			if role != "admin" && !a.vulnerable {
+			if role != "admin" && !vulnerable {
 				w.WriteHeader(403)
 				_, _ = w.Write([]byte(`{"message":"forbidden"}`))
 				return
@@ -104,7 +150,7 @@ func (a *notesApp) handler() http.Handler {
 			note, ok := a.notes[id]
 			a.mu.Unlock()
 			mine := ok && note["ownerId"] == who
-			visible := mine || (ok && (role == "admin" || a.vulnerable))
+			visible := mine || (ok && (role == "admin" || vulnerable))
 			switch r.Method {
 			case http.MethodGet:
 				if !visible || a.noRead {
@@ -143,6 +189,8 @@ const notesSpec = `{"openapi":"3.0.3","info":{"title":"notes","version":"1"},
   "/api/admin/stats":{"get":{}},
   "/api/admin/reset":{"post":{}},
   "/api/admin/logout":{"get":{}},
+  "/api/notes/count":{"get":{}},
+  "/api/notes/search":{"get":{"parameters":[{"name":"q","in":"query"}]}},
   "/api/notes":{"post":{}},
   "/api/notes/{noteId}":{"parameters":[{"name":"noteId","in":"path","required":true,"schema":{"type":"string"}}],
     "get":{},"delete":{}}}}`
@@ -167,6 +215,21 @@ const notesAccess = `access:
       allow: [admin]
 `
 
+// authzUserFirst lists the user before the admin, so the primary identity is
+// the one that should be refused.
+var authzUserFirst bool
+
+func authzIdentities() string {
+	admin := "  - id: admin\n    role: admin\n    authentication: {type: bearer, credential: {env: AUTHZ_ADMIN_TOKEN}}\n" +
+		"    liveness: {path: /api/me, self: /id}\n"
+	user := "  - id: user\n    role: user\n    authentication: {type: bearer, credential: {env: AUTHZ_USER_TOKEN}}\n" +
+		"    liveness: {path: /api/me, self: /id}\n"
+	if authzUserFirst {
+		return user + admin
+	}
+	return admin + user
+}
+
 func runAuthz(t *testing.T, app *notesApp, extra string) (map[string]any, string) {
 	t.Helper()
 	srv := httptest.NewServer(app.handler())
@@ -177,18 +240,14 @@ func runAuthz(t *testing.T, app *notesApp, extra string) (map[string]any, string
 	t.Setenv("AUTHZ_USER_TOKEN", authzUserToken)
 	cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
 		"discovery:\n  probeWellKnownPaths: false\n  crawl: {enabled: false}\n" + extra +
-		"identities:\n" +
-		"  - id: admin\n    role: admin\n    authentication: {type: bearer, credential: {env: AUTHZ_ADMIN_TOKEN}}\n" +
-		"    liveness: {path: /api/me, self: /id}\n" +
-		"  - id: user\n    role: user\n    authentication: {type: bearer, credential: {env: AUTHZ_USER_TOKEN}}\n" +
-		"    liveness: {path: /api/me, self: /id}\n"
+		"identities:\n" + authzIdentities()
 	for name, body := range map[string]string{"sulayi.yaml": cfg, "openapi.json": notesSpec} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	_, out, errOut := run(t, "attack", "--spec", "openapi.json")
-	reports, _ := filepath.Glob(filepath.Join(dir, ".sulayi", "runs", "*", "report.json"))
+	reports, _ := filepath.Glob(filepath.Join(dir, "*", "runs", "*", "report.json"))
 	if len(reports) != 1 {
 		t.Fatalf("reports = %d\nstdout: %s\nstderr: %s", len(reports), out, errOut)
 	}

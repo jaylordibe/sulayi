@@ -36,7 +36,7 @@ tool can cause.
 ## Supported versions
 
 Pre-1.0, only the latest release is supported. Output schemas
-(`sulayi.report/v1alpha1`, `sulayi.run/v1alpha1`, `sulayi/v1alpha1`) may change between
+(`sulayi.report/v1alpha2`, `sulayi.run/v1alpha1`, `sulayi/v1alpha1`) may change between
 minor versions; each is versioned so a consumer can detect the change rather than misparse.
 
 ## Using Sulayi safely

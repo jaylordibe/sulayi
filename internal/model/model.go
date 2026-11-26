@@ -669,6 +669,76 @@ type Finding struct {
 	Verification VerificationRecord
 	Remediation  string
 	Reproduction []string
+	// Recipe is what `sulayi verify` needs to re-run this finding, and nothing
+	// else. Nil for an imported observation, which Sulayi cannot re-run.
+	Recipe *Recipe
+}
+
+// Recipe identifies the unit of work that produced a finding (ADR-0024): the
+// check, the operation exactly as it was assessed, and who and what was
+// involved, by id. It carries no credential, no evidence and no response: a
+// re-run takes its credentials from the configuration in force when it runs.
+type Recipe struct {
+	CheckID   string
+	Operation RecipeOperation
+	// IdentityID is the identity that should have been refused, for a
+	// cross-owner or cross-role finding.
+	IdentityID string
+	// OwnerIdentityID is the owner, or the allowed identity whose success was
+	// the baseline.
+	OwnerIdentityID string
+	// Fixture is the resource the operation was addressed through, if any.
+	Fixture *RecipeFixture
+}
+
+// RecipeOperation is an operation as it was assessed, without its host.
+type RecipeOperation struct {
+	ID           string
+	Method       string
+	PathTemplate string
+	// BasePath is the path part of the operation's base URL, e.g. a
+	// specification's server path.
+	BasePath   string
+	Parameters []Parameter
+	// Security is the declared expectation, with nil meaning none was stated.
+	Security    []SecurityRequirement
+	SourceKinds []SourceKind
+}
+
+// RecipeFixture names the resource a finding was produced through. A
+// configured fixture is looked up by id in the configuration in force; a
+// created record is created again from its type's recipe, as its owner.
+type RecipeFixture struct {
+	ID         string
+	Type       string
+	Owner      string
+	Provenance string
+}
+
+// RecipeOperationOf snapshots an operation for a recipe.
+func RecipeOperationOf(op Operation) RecipeOperation {
+	r := RecipeOperation{ID: op.ID, Method: op.Method, PathTemplate: op.PathTemplate,
+		Parameters: append([]Parameter(nil), op.Parameters...)}
+	if u, err := url.Parse(op.BaseURL); err == nil {
+		r.BasePath = strings.TrimRight(u.Path, "/")
+	}
+	if op.Security != nil {
+		r.Security = append([]SecurityRequirement{}, op.Security...)
+	}
+	for _, s := range op.Sources {
+		r.SourceKinds = append(r.SourceKinds, s.Kind)
+	}
+	return r
+}
+
+// Operation rebuilds the operation on a target origin.
+func (r RecipeOperation) Operation(origin string) Operation {
+	op := Operation{ID: r.ID, Method: r.Method, PathTemplate: r.PathTemplate,
+		BaseURL: strings.TrimRight(origin, "/") + r.BasePath, Parameters: r.Parameters, Security: r.Security}
+	for _, k := range r.SourceKinds {
+		op.Sources = append(op.Sources, Source{Kind: k, Ref: "recipe"})
+	}
+	return op
 }
 
 // ExternalSource records where an imported observation came from.

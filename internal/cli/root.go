@@ -45,6 +45,8 @@ func ExecuteContext(ctx context.Context, args []string, stdout, stderr io.Writer
 	root.AddCommand(newAttackCommand(stdout, stderr))
 	root.AddCommand(newInitCommand(stdout, stderr))
 	root.AddCommand(newDoctorCommand(stdout, stderr))
+	root.AddCommand(newVerifyCommand(stdout, stderr))
+	root.AddCommand(newReportCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout))
 
 	if err := root.ExecuteContext(ctx); err != nil {

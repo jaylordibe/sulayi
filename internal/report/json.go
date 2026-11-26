@@ -6,6 +6,8 @@
 package report
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,7 +29,7 @@ import (
 // Consumers must treat an unrecognised blocked cause, outcome or finding state
 // as blocked rather than as success. Within a major version, fields are added
 // but never removed or repurposed.
-const SchemaVersion = "sulayi.report/v1alpha1"
+const SchemaVersion = "sulayi.report/v1alpha2"
 
 // Document is the JSON report.
 type Document struct {
@@ -61,6 +63,8 @@ type Document struct {
 	ToolFailures []string `json:"toolFailures"`
 	// CleanupIncomplete names fixtures that may still be modified.
 	CleanupIncomplete []string `json:"cleanupIncomplete"`
+	// Verification is present when this run re-ran one earlier finding.
+	Verification *RunVerification `json:"verification,omitempty"`
 	// Records lists every record the run created as its identities, and
 	// whether each was removed and the removal verified.
 	Records            []Record `json:"records"`
@@ -381,6 +385,115 @@ type Finding struct {
 	Verification Verification    `json:"verification"`
 	Remediation  string          `json:"remediation,omitempty"`
 	Reproduction []string        `json:"reproduction,omitempty"`
+	// Ref is a short reference to the finding for `sulayi verify`.
+	Ref string `json:"ref"`
+	// Recipe is what `sulayi verify` re-runs. Absent for an imported
+	// observation, which cannot be re-run.
+	Recipe *Recipe `json:"recipe,omitempty"`
+}
+
+// Recipe is a finding's re-run recipe (ADR-0024). It carries ids, never a
+// credential or a response.
+type Recipe struct {
+	CheckID   string          `json:"checkId"`
+	Operation RecipeOperation `json:"operation"`
+	// IdentityID is the identity that should have been refused.
+	IdentityID string `json:"identityId,omitempty"`
+	// OwnerIdentityID is the owner, or the allowed identity of the baseline.
+	OwnerIdentityID string         `json:"ownerIdentityId,omitempty"`
+	Fixture         *RecipeFixture `json:"fixture,omitempty"`
+}
+
+// RecipeOperation is the operation as it was assessed, without its host.
+type RecipeOperation struct {
+	ID           string      `json:"id"`
+	Method       string      `json:"method"`
+	PathTemplate string      `json:"pathTemplate"`
+	BasePath     string      `json:"basePath,omitempty"`
+	Parameters   []Parameter `json:"parameters,omitempty"`
+	// SecurityDeclared distinguishes "nothing was stated" from "declared
+	// public", which an empty list alone cannot.
+	SecurityDeclared bool       `json:"securityDeclared"`
+	Security         [][]string `json:"security,omitempty"`
+	Sources          []string   `json:"sources,omitempty"`
+}
+
+// Parameter is one declared operation parameter.
+type Parameter struct {
+	Name     string `json:"name"`
+	In       string `json:"in"`
+	Required bool   `json:"required,omitempty"`
+}
+
+// RecipeFixture names the resource a finding was produced through.
+type RecipeFixture struct {
+	ID         string `json:"id"`
+	Type       string `json:"type,omitempty"`
+	Owner      string `json:"owner,omitempty"`
+	Provenance string `json:"provenance,omitempty"`
+}
+
+// RunVerification links a re-run to the finding it re-ran.
+type RunVerification struct {
+	OfRun     string `json:"ofRun"`
+	OfFinding string `json:"ofFinding"`
+	Ref       string `json:"ref"`
+	Verdict   string `json:"verdict"`
+	Detail    string `json:"detail"`
+}
+
+// Ref is a finding's short reference: the first 12 hex digits of the SHA-256
+// of its id. Ids carry spaces and colons; a ref is what a person types.
+func Ref(findingID string) string {
+	sum := sha256.Sum256([]byte(findingID))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+func recipeOf(r *model.Recipe) *Recipe {
+	if r == nil {
+		return nil
+	}
+	op := RecipeOperation{ID: r.Operation.ID, Method: r.Operation.Method, PathTemplate: r.Operation.PathTemplate,
+		BasePath: r.Operation.BasePath, SecurityDeclared: r.Operation.Security != nil}
+	for _, p := range r.Operation.Parameters {
+		op.Parameters = append(op.Parameters, Parameter{Name: p.Name, In: p.In, Required: p.Required})
+	}
+	for _, req := range r.Operation.Security {
+		op.Security = append(op.Security, append([]string{}, req.Schemes...))
+	}
+	for _, k := range r.Operation.SourceKinds {
+		op.Sources = append(op.Sources, string(k))
+	}
+	out := &Recipe{CheckID: r.CheckID, Operation: op, IdentityID: r.IdentityID, OwnerIdentityID: r.OwnerIdentityID}
+	if r.Fixture != nil {
+		f := RecipeFixture(*r.Fixture)
+		out.Fixture = &f
+	}
+	return out
+}
+
+// Model returns the recipe in the model's form.
+func (r Recipe) Model() model.Recipe {
+	op := model.RecipeOperation{ID: r.Operation.ID, Method: r.Operation.Method,
+		PathTemplate: r.Operation.PathTemplate, BasePath: r.Operation.BasePath}
+	for _, p := range r.Operation.Parameters {
+		op.Parameters = append(op.Parameters, model.Parameter{Name: p.Name, In: p.In, Required: p.Required})
+	}
+	if r.Operation.SecurityDeclared {
+		op.Security = []model.SecurityRequirement{}
+		for _, schemes := range r.Operation.Security {
+			op.Security = append(op.Security, model.SecurityRequirement{Schemes: append([]string{}, schemes...)})
+		}
+	}
+	for _, k := range r.Operation.Sources {
+		op.SourceKinds = append(op.SourceKinds, model.SourceKind(k))
+	}
+	out := model.Recipe{CheckID: r.CheckID, Operation: op, IdentityID: r.IdentityID, OwnerIdentityID: r.OwnerIdentityID}
+	if r.Fixture != nil {
+		f := model.RecipeFixture(*r.Fixture)
+		out.Fixture = &f
+	}
+	return out
 }
 
 // ExternalSource is an imported result's provenance.
@@ -534,7 +647,13 @@ func Build(res engine.Result, version string) Document {
 			},
 			Remediation:  f.Remediation,
 			Reproduction: f.Reproduction,
+			Ref:          Ref(f.ID),
+			Recipe:       recipeOf(f.Recipe),
 		})
+	}
+	if v := res.Verification; v != nil {
+		doc.Verification = &RunVerification{OfRun: v.OfRun, OfFinding: v.OfFinding, Ref: v.Ref,
+			Verdict: string(v.Verdict), Detail: v.Detail}
 	}
 
 	for _, e := range res.Coverage {
@@ -934,10 +1053,35 @@ func WriteJSON(w io.Writer, doc Document) error {
 	return enc.Encode(doc)
 }
 
+// FindingsTable lists each finding with the ref `sulayi verify` takes, and
+// says which cannot be re-run.
+func FindingsTable(doc Document) string {
+	if len(doc.Findings) == 0 {
+		return "  no findings\n"
+	}
+	var b strings.Builder
+	b.WriteString("\n  findings (verify one with: sulayi verify <ref>)\n")
+	for _, f := range doc.Findings {
+		ref := f.Ref
+		if f.Recipe == nil {
+			ref = "(none)      "
+		}
+		where := f.OperationID
+		if f.IdentityID != "" {
+			where += " as " + f.IdentityID
+		}
+		b.WriteString(fmt.Sprintf("    %s  %-10s %-8s %s — %s\n", ref, f.State, f.Severity, f.Title, where))
+	}
+	return b.String()
+}
+
 // Summary renders a short human-readable result for a terminal.
 func Summary(doc Document) string {
 	var b strings.Builder
 	b.WriteString("Sulayi assessment " + doc.Run.ID + "\n")
+	if v := doc.Verification; v != nil {
+		b.WriteString("  verifies: " + v.Ref + " (" + v.OfFinding + ") from run " + v.OfRun + "\n")
+	}
 	b.WriteString("  target:   " + doc.Run.Target + "\n")
 	b.WriteString("  profile:  " + doc.Run.Profile + "\n")
 	surfaceFrom := doc.Surface.Source.Kind

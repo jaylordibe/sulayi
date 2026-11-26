@@ -31,6 +31,7 @@ import (
 	"github.com/jaylordibe/sulayi/internal/outcome"
 	"github.com/jaylordibe/sulayi/internal/record"
 	"github.com/jaylordibe/sulayi/internal/redact"
+	"github.com/jaylordibe/sulayi/internal/report"
 	"github.com/jaylordibe/sulayi/internal/scanner"
 	"github.com/jaylordibe/sulayi/internal/scanner/nuclei"
 	"github.com/jaylordibe/sulayi/internal/scanner/sast"
@@ -122,7 +123,7 @@ func newAttackCommand(stdout, stderr io.Writer) *cobra.Command {
 				}
 				har = &parsed
 			}
-			return runScan(cmd.Context(), cfg, creds, har, stdout, stderr)
+			return runScan(cmd.Context(), cfg, creds, har, nil, stdout, stderr)
 		},
 	}
 
@@ -218,8 +219,14 @@ func isLoopbackTarget(raw string) bool {
 	return addr.IsLoopback()
 }
 
-func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, har *discovery.HARResult,
+// runFocused runs an assessment narrowed to one finding's recipe.
+func runFocused(ctx context.Context, cfg config.Config, creds *identity.EnvFile, f *focus,
 	stdout, stderr io.Writer) error {
+	return runScan(ctx, cfg, creds, nil, f, stdout, stderr)
+}
+
+func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, har *discovery.HARResult,
+	f *focus, stdout, stderr io.Writer) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -291,10 +298,17 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 
 	// A specification is one source of surface, not a requirement: adapters,
 	// a browser recording and the crawler each find routes without one.
-	specOptional := len(cfg.AdapterSpecs()) > 0 || har != nil || cfg.CrawlEnabled()
-	surface, err := discover(ctx, cfg, client, now, specOptional)
-	if err != nil {
-		return fail(ExitAborted, "discovery failed: %v", err)
+	// A verification run's surface is the one operation its recipe names;
+	// nothing is discovered (ADR-0024).
+	var surface engine.Surface
+	if f != nil {
+		surface = focusSurface(cfg, f.recipe)
+	} else {
+		specOptional := len(cfg.AdapterSpecs()) > 0 || har != nil || cfg.CrawlEnabled()
+		surface, err = discover(ctx, cfg, client, now, specOptional)
+		if err != nil {
+			return fail(ExitAborted, "discovery failed: %v", err)
+		}
 	}
 
 	// Framework adapters run before planning, because their whole purpose is to
@@ -506,7 +520,9 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 	// protected. A finding against an inference is never confirmed, and is
 	// raised at all only when an anonymous caller receives what the signed-in
 	// one did.
-	surface.Operations, surface.NavigationInferred = inferFromNavigation(surface.Operations)
+	if f == nil {
+		surface.Operations, surface.NavigationInferred = inferFromNavigation(surface.Operations)
+	}
 
 	// The declared access policy is the oracle for routes no specification
 	// describes. It replaces navigation inferences, fills expectations nothing
@@ -515,11 +531,13 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 	if err != nil {
 		return fail(ExitUsage, "%v", err)
 	}
-	surface.Operations, surface.Access = accessPolicy.Apply(surface.Operations)
-	for _, c := range surface.Access.Conflicts {
-		fmt.Fprintf(stderr, "sulayi: access policy: %s\n", c.Detail)
+	if f == nil {
+		surface.Operations, surface.Access = accessPolicy.Apply(surface.Operations)
+		for _, c := range surface.Access.Conflicts {
+			fmt.Fprintf(stderr, "sulayi: access policy: %s\n", c.Detail)
+		}
+		surface.Fidelity = openapi.Grade(surface.Operations)
 	}
-	surface.Fidelity = openapi.Grade(surface.Operations)
 
 	if len(surface.Operations) == 0 && !surface.SpecDerived {
 		fmt.Fprintln(stderr, "sulayi: no operation was found without a specification. Give one with "+
@@ -591,6 +609,24 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 		check.StackTrace{Injection: inj},
 		check.CORSCredentialed{Injection: inj},
 	}
+	// A verification run keeps only the check its recipe names.
+	if f != nil {
+		kept := checks[:0]
+		for _, c := range checks {
+			if f.keepCheck(c.Metadata().ID) {
+				kept = append(kept, c)
+			}
+		}
+		checks = kept
+	}
+	var ownerCheck, roleCheck engine.ResourceCheck = check.CrossOwner{Signals: signals, Now: now},
+		check.CrossRole{Signals: signals, Now: now}
+	if f != nil && !strings.HasPrefix(f.recipe.CheckID, "cross-owner-") {
+		ownerCheck = nil
+	}
+	if f != nil && f.recipe.CheckID != check.CrossRoleReadID {
+		roleCheck = nil
+	}
 
 	if len(fixtures) > 0 && identities.Len() < 2 {
 		fmt.Fprintln(stderr, "sulayi: warning: resource fixtures are configured but fewer than two "+
@@ -632,6 +668,13 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 		}
 	}
 
+	// A verification first establishes that the operation still answers, so
+	// a route the application has since moved cannot read as fixed.
+	var routeGone string
+	if f != nil {
+		routeGone = f.routeGone(ctx, surface.Operations[0], fixtures, identities, client)
+	}
+
 	res, err := engine.Run(ctx, engine.Options{
 		RunID:                   runID,
 		Target:                  cfg.Target.BaseURL,
@@ -650,9 +693,9 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 		RequestsPerSecond:       cfg.Assessment.RequestsPerSecond,
 		Identities:              identities,
 		Resources:               fixtures,
-		ResourceCheck:           check.CrossOwner{Signals: signals, Now: now},
+		ResourceCheck:           ownerCheck,
 		RoleRules:               rules,
-		RoleCheck:               check.CrossRole{Signals: signals, Now: now},
+		RoleCheck:               roleCheck,
 		Now:                     now,
 		Engines:                 engines,
 		EvidenceSink:            run.PutEvidence,
@@ -668,6 +711,15 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 	res.Requests, res.RequestLimit, res.CleanupRequests = usage.Used, usage.Limit, usage.CleanupUsed
 	res.StoppedEarly = stoppedEarly(ctx, cfg, usage, res)
 
+	if f != nil {
+		verdict, detail := f.verdict(res)
+		if routeGone != "" && verdict == engine.VerdictFixed {
+			verdict, detail = engine.VerdictInconclusive, routeGone
+		}
+		res.Verification = &engine.Verification{OfRun: f.ofRun, OfFinding: f.ofFinding,
+			Ref: report.Ref(f.ofFinding), Verdict: verdict, Detail: detail}
+		return persistVerification(res, run, stdout, stderr)
+	}
 	return persistAndSummarize(res, run, cfg.Policy, stdout, stderr)
 }
 

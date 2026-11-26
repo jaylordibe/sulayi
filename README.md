@@ -142,7 +142,7 @@ compare against. [Add identities](#identities) and the same defect can be confir
 | Testing across accounts and roles from records Sulayi creates and deletes itself, against declared ownership and role rules | Implemented — validated on local fixtures; the reference-starter run is pending |
 | Testing applications without an OpenAPI document: framework adapters, browser recordings (HAR, discovery only) and a bounded same-origin crawler, with a declared access policy as the oracle | Implemented — the crawler reads server-rendered links only; a single-page app's API comes from a HAR |
 | Injection and misconfiguration checks: boolean SQL injection, reflected XSS, template injection, open redirect, credentialed CORS, stack-trace disclosure — GET query and path parameters only | Implemented — validated on paired local fixtures |
-| `sulayi report`, `sulayi verify <finding-id>` | Planned |
+| `sulayi report` and `sulayi verify <finding>`: re-running one finding from its recipe, with fresh sign-ins, as a new linked run | Implemented — validated on local fixtures |
 
 ---
 
@@ -328,6 +328,23 @@ arbitrary origin echoed with credentials allowed for a cookie session, or stack 
 malformed value produced. `safe` sends only inert payloads; SQL conditions and template expressions need
 `standard` and are sent only in reads, which the HTTP client enforces by recognising them
 in the request. Request bodies are not tested yet, and the report says so.
+
+### Checking a fix
+
+Every finding carries a recipe: the check, the operation as it was assessed, and who and
+what was involved, by id — never a credential. `sulayi report` prints a run's findings with
+a short ref; `sulayi verify <ref>` re-runs that one check on that one operation with fresh
+sign-ins and your current `sulayi.yaml`, as a new run linked to the original
+([ADR-0024](docs/adr/0024-verify-a-finding-from-its-recipe.md)):
+
+```
+sulayi report                      # latest run, with refs
+sulayi verify 336fb57dba64 --env .env.sulayi.local
+```
+
+The verdict is **reproduced** (exit 1), **fixed** (exit 0: the check ran and found
+nothing), or **inconclusive** (exit 3: something kept it from running, such as an identity
+that cannot sign in or a route that no longer answers). Inconclusive is never fixed.
 
 ---
 

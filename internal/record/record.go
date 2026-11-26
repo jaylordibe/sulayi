@@ -453,6 +453,13 @@ func Fixtures(created []Created, ops []model.Operation, rules *access.Rules, set
 	return out
 }
 
+// Addresses reports whether an operation addresses a record of this recipe
+// at its own path.
+func (r Recipe) Addresses(op model.Operation) bool {
+	_, ok := addresses(r.DeletePath, op)
+	return ok
+}
+
 // addresses reports whether an operation addresses the record itself, at the
 // record's own path, returning the operation's parameter name in the id
 // position. A sub-collection under it (/workspaces/{id}/memberships) is not
