@@ -6,11 +6,45 @@
 #
 # Only the four names below are read from that file; everything else in it is
 # ignored. The reference-applications workflow runs exactly this.
+#
+# Authorization across accounts and roles (ADR-0022): each account creates a
+# device token and a workspace, the user tries to read the admin's (the admin's
+# "manage all" reaches every record by design, so it is not probed), and all of
+# them are deleted afterwards. The user is compared with the admin on the
+# administrative reads.
 apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://127.0.0.1:3000
 discovery:
   probeWellKnownPaths: false
+access:
+  owned:
+    - paths: ["/api/device-tokens/*", "/api/workspaces/*"]
+      reachableBy: [admin]
+  roles:
+    - paths: ["/api/users", "/api/audit-logs/**", "/api/queues/**"]
+      allow: [admin]
+records:
+  - type: device-token
+    create:
+      path: /api/device-tokens
+      body:
+        userId: { self: true }
+        token: { random: true }
+        appPlatform: { value: web }
+        deviceType: { value: laptop }
+        deviceOs: { value: linux }
+        deviceOsVersion: { value: "1" }
+    id: /id
+    delete: /api/device-tokens/{id}
+  - type: workspace
+    create:
+      path: /api/workspaces
+      body:
+        name: { value: Assessment workspace }
+        slug: { random: true }
+    id: /id
+    delete: /api/workspaces/{id}
 identities:
   - id: admin
     role: admin
@@ -23,7 +57,7 @@ identities:
           password: { env: SEED_ADMIN_PASSWORD }
         session:
           bearer: /accessToken
-    liveness: { method: GET, path: /api/users/me }
+    liveness: { method: GET, path: /api/users/me, self: /id }
   - id: user
     role: user
     authentication:
@@ -35,4 +69,4 @@ identities:
           password: { env: SEED_USER_PASSWORD }
         session:
           bearer: /accessToken
-    liveness: { method: GET, path: /api/users/me }
+    liveness: { method: GET, path: /api/users/me, self: /id }

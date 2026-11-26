@@ -61,11 +61,7 @@ const (
 	// ProvenanceConfigured means the operator declared the fixture.
 	ProvenanceConfigured Provenance = "configured"
 	// ProvenanceAPICreated means Sulayi created the resource through
-	// the application's own API as the owning identity.
-	//
-	// Declared but not produced in M2: creating a resource needs setup
-	// orchestration this milestone deliberately does not build. The constant
-	// exists so that the report schema does not have to change when it does.
+	// the application's own API as the owning identity (ADR-0022).
 	ProvenanceAPICreated Provenance = "api-created"
 )
 

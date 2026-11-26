@@ -58,6 +58,37 @@ func validateAgainstSchema(t *testing.T, schema *jsonschema.Schema, doc string) 
 
 // validDocuments must be accepted by both the parser and the schema.
 var validDocuments = map[string]string{
+	"records Sulayi creates, with ownership and role rules": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://localhost:3000
+identities:
+  - id: admin
+    role: admin
+    authentication: { type: bearer, credential: { env: ADMIN_TOKEN } }
+    liveness: { path: /api/users/me, self: /id }
+  - id: user
+    role: user
+    authentication: { type: bearer, credential: { env: USER_TOKEN } }
+    liveness: { path: /api/users/me, self: /id }
+records:
+  - type: device-token
+    create:
+      path: /api/device-tokens
+      body:
+        userId: { self: true }
+        token: { random: true }
+        appPlatform: { value: web }
+    id: /id
+    delete: /api/device-tokens/{id}
+access:
+  owned:
+    - paths: ["/api/device-tokens/*"]
+      reachableBy: [admin]
+  roles:
+    - paths: ["/api/users", "/api/audit-logs/**"]
+      allow: [admin]
+`,
 	"spec-less surface with an access policy and a crawl": `
 apiVersion: sulayi/v1alpha1
 target:
@@ -271,6 +302,55 @@ assessment:
 // structurallyInvalidDocuments must be rejected by BOTH, because each violation
 // is expressible in the schema.
 var structurallyInvalidDocuments = map[string]string{
+	"record body value that is null": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+records:
+  - type: note
+    create: { path: /notes, body: { title: { value: null } } }
+    id: /id
+    delete: /notes/{id}
+`,
+	"record id parameter that is not a whole segment": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+records:
+  - type: note
+    create: { path: /notes, body: { title: { value: x } } }
+    id: /id
+    delete: /notes/x{id}
+`,
+	"record body field with two sources": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+records:
+  - type: note
+    create: { path: /notes, body: { owner: { self: true, random: true } } }
+    id: /id
+    delete: /notes/{id}
+`,
+	"record delete path without its id": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+records:
+  - type: note
+    create: { path: /notes, body: { title: { value: x } } }
+    id: /id
+    delete: /notes
+`,
+	"role rule that allows no role": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+access:
+  roles:
+    - paths: ["/admin/**"]
+      allow: []
+`,
 	"access pattern without a leading slash": `
 apiVersion: sulayi/v1alpha1
 target:
@@ -671,6 +751,18 @@ func TestSchemaAcceptsEverythingTheParserAccepts(t *testing.T) {
 // point rather than two, and pretending otherwise in the conformance table would
 // be the sort of overstatement this project exists to avoid.
 var semanticallyInvalidDocuments = map[string]string{
+	"an identity without a role under ownership rules": `
+apiVersion: sulayi/v1alpha1
+target:
+  baseURL: http://x.test
+identities:
+  - id: admin
+    authentication: { type: bearer, credential: { env: ADMIN_TOKEN } }
+access:
+  owned:
+    - paths: ["/api/notes/*"]
+      reachableBy: [admin]
+`,
 	"resource owner is not a configured identity": `
 apiVersion: sulayi/v1alpha1
 target:

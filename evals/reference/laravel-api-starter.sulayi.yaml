@@ -6,11 +6,35 @@
 #
 # Only the four names below are read from that file; everything else in it is
 # ignored. The reference-applications workflow runs exactly this.
+#
+# Authorization across accounts (ADR-0022): each account creates a device token,
+# the other tries to read it, and both are deleted afterwards. The starter
+# answers another account's token with 400 "Device token not found.", which the
+# outcome signal below names as not-found. Both seeded roles hold every
+# permission, so there is no role boundary to declare.
 apiVersion: sulayi/v1alpha1
 target:
   baseURL: http://127.0.0.1:8000
 discovery:
   probeWellKnownPaths: false
+outcome:
+  errorCodePointer: /message
+  notFoundCodes: ["Device token not found."]
+access:
+  owned:
+    - paths: ["/api/device-tokens/*"]
+records:
+  - type: device-token
+    create:
+      path: /api/device-tokens
+      body:
+        token: { random: true }
+        appPlatform: { value: web }
+        deviceType: { value: laptop }
+        deviceOs: { value: linux }
+        deviceOsVersion: { value: "1" }
+    id: /id
+    delete: /api/device-tokens/{id}
 identities:
   - id: sysad
     role: system-admin

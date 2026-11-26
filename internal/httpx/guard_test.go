@@ -331,3 +331,63 @@ func TestAuthenticationRequestsStillPassEveryOtherGate(t *testing.T) {
 		t.Errorf("request log lines = %d, want 3 (one per attempt, refusals included)", len(recs))
 	}
 }
+
+// A record Sulayi creates may be created once and deleted once, exactly as
+// registered. Nothing else becomes possible: not a second create, not a
+// different body, not a DELETE of any other record, and not the same DELETE
+// twice.
+func TestStandardPermitsOneExactCreateAndOneExactCleanup(t *testing.T) {
+	g, err := NewGuard(model.ProfileStandard, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newGuardFixture(t, g)
+	body := `{"token":"r4nd0m"}`
+	if err := g.GrantCreate(f.srv.URL+"/api/tokens", []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.GrantCleanup(f.srv.URL + "/api/tokens/7"); err != nil {
+		t.Fatal(err)
+	}
+	g.Seal()
+
+	f.expectRefused(t, http.MethodPost, "/api/tokens", `{"token":"other"}`)
+	f.expectSent(t, http.MethodPost, "/api/tokens", body)
+	f.expectRefused(t, http.MethodPost, "/api/tokens", body)
+
+	f.expectRefused(t, http.MethodDelete, "/api/tokens/8", "")
+	f.expectRefused(t, http.MethodDelete, "/api/tokens/7", `{"x":1}`)
+	f.expectSent(t, http.MethodDelete, "/api/tokens/7", "")
+	f.expectRefused(t, http.MethodDelete, "/api/tokens/7", "")
+
+	if err := g.GrantCleanup(f.srv.URL + "/api/tokens/9"); err == nil {
+		t.Error("a cleanup grant was accepted after the guard was sealed")
+	}
+}
+
+// Safe sends nothing state-changing, one-shot grants included.
+func TestSafeIgnoresOneShotGrants(t *testing.T) {
+	g, err := NewGuard(model.ProfileSafe, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newGuardFixture(t, g)
+	if err := g.GrantCleanup(f.srv.URL + "/api/tokens/7"); err != nil {
+		t.Fatal(err)
+	}
+	f.expectRefused(t, http.MethodDelete, "/api/tokens/7", "")
+}
+
+// Aggressive permits every state-changing request, so one-shot grants are not
+// recorded: each identity creating the same kind of record must not collide.
+func TestAggressiveDoesNotRecordOneShotGrants(t *testing.T) {
+	g, err := NewGuard(model.ProfileAggressive, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := g.GrantCreate("http://127.0.0.1:1/api/tokens", []byte(`{"t":1}`)); err != nil {
+			t.Fatalf("create grant %d: %v", i+1, err)
+		}
+	}
+}

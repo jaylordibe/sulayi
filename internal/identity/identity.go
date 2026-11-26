@@ -191,6 +191,10 @@ type Liveness struct {
 	// ExpectStatus lists statuses that mean the identity is still good. Empty
 	// means any 2xx.
 	ExpectStatus []int
+	// Self is a JSON pointer to the identity's own id in the canary's
+	// response, so a record created as this identity can name its owner
+	// (ADR-0022). Optional.
+	Self string
 }
 
 // Configured reports whether a canary was supplied.
@@ -301,6 +305,10 @@ func (i Identity) Validate(path string) []string {
 		if i.Live.Method != "" && !isSafeCanaryMethod(i.Live.Method) {
 			problems = append(problems, fmt.Sprintf("%s.liveness.method %q may change state; a canary runs "+
 				"repeatedly and must be a safe method (GET, HEAD or OPTIONS)", path, i.Live.Method))
+		}
+		if i.Live.Self != "" && !strings.HasPrefix(i.Live.Self, "/") {
+			problems = append(problems, fmt.Sprintf("%s.liveness.self %q must be a JSON pointer beginning "+
+				"with /", path, i.Live.Self))
 		}
 		for _, s := range i.Live.ExpectStatus {
 			if s < 100 || s > 599 {

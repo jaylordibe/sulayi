@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -562,5 +563,20 @@ func TestStateChangingOperationsMustNameAMethodAndPath(t *testing.T) {
 	}
 	if _, err := parse(t, minimal+"\nassessment:\n  stateChangingOperations: [\"GET /logout\", \"get /orders/{id}/cancel\"]\n"); err != nil {
 		t.Errorf("valid state-changing operations rejected: %v", err)
+	}
+}
+
+// The reference configurations are run by the reference workflow against the
+// real starters; one that stopped parsing would fail there, weekly, instead of
+// here.
+func TestReferenceConfigurationsAreValid(t *testing.T) {
+	files, _ := filepath.Glob(filepath.Join("..", "..", "evals", "reference", "*.sulayi.yaml"))
+	if len(files) == 0 {
+		t.Fatal("no reference configuration found")
+	}
+	for _, f := range files {
+		if _, err := Load(f); err != nil {
+			t.Errorf("%s: %v", filepath.Base(f), err)
+		}
 	}
 }

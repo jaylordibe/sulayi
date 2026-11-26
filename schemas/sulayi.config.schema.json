@@ -416,6 +416,11 @@
                   "maximum": 599
                 },
                 "description": "Statuses meaning the identity is still good. Empty means any 2xx."
+              },
+              "self": {
+                "type": "string",
+                "pattern": "^/",
+                "description": "A JSON pointer to the identity's own id in the response, for record creation bodies that must name their owner."
               }
             }
           }
@@ -503,6 +508,83 @@
                 "description": "Explicit field/value pairs sent as a JSON object. Not a payload language."
               }
             }
+          }
+        }
+      }
+    },
+    "records": {
+      "type": "array",
+      "description": "Records Sulayi creates as each identity through the application's own API, uses as that identity's owned resources, and deletes afterwards, verifying each is gone (ADR-0022). The safe profile creates none; standard sends exactly these creations and deletions and no other DELETE.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "create",
+          "id",
+          "delete"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"
+          },
+          "create": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "body"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^/[^?#{}]*$",
+                "description": "The collection the record is POSTed to, on the target's origin."
+              },
+              "body": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "maxProperties": 1,
+                  "description": "Exactly one of: a literal value, the creating identity's own id (self: true), or a value random per run (random: true). A credential can never be referenced.",
+                  "properties": {
+                    "value": {
+                      "description": "A literal JSON value; not null.",
+                      "not": {
+                        "type": "null"
+                      }
+                    },
+                    "self": {
+                      "const": true
+                    },
+                    "random": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^/",
+            "description": "A JSON pointer to the new record's id in the creation response."
+          },
+          "delete": {
+            "type": "string",
+            "pattern": "^(/[^/?#{}]+)*/\\{[^/{}]+\\}(/[^/?#{}]+)*$",
+            "description": "The path of one record, with exactly one {param} segment: its id."
+          },
+          "as": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Identities that each create one. Empty means every identity."
           }
         }
       }
@@ -849,6 +931,67 @@
             "type": "string",
             "pattern": "^/",
             "description": "A path pattern: * matches one segment, a trailing ** any number."
+          }
+        },
+        "owned": {
+          "type": "array",
+          "description": "Paths whose records belong to the identity that created them (ADR-0022). A record Sulayi creates is read under these paths by every other identity except those whose role is in reachableBy. A path no rule matches has no expectation, and nothing is concluded about it.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "paths"
+            ],
+            "properties": {
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "^/",
+                  "description": "A path pattern: * matches one segment, a trailing ** any number."
+                }
+              },
+              "reachableBy": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                },
+                "description": "Roles that may reach other identities' records by design, such as an administrator whose permissions cover every record."
+              }
+            }
+          }
+        },
+        "roles": {
+          "type": "array",
+          "description": "Paths only the roles a rule allows may call (ADR-0022). Each GET under one is requested by every identity whose role is not allowed and compared with an identity whose role is. State-changing routes are never probed across roles.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "paths",
+              "allow"
+            ],
+            "properties": {
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "^/",
+                  "description": "A path pattern: * matches one segment, a trailing ** any number."
+                }
+              },
+              "allow": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                }
+              }
+            }
           }
         }
       }

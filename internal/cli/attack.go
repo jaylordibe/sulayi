@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/jaylordibe/sulayi/internal/model"
 	"github.com/jaylordibe/sulayi/internal/openapi"
 	"github.com/jaylordibe/sulayi/internal/outcome"
+	"github.com/jaylordibe/sulayi/internal/record"
 	"github.com/jaylordibe/sulayi/internal/redact"
 	"github.com/jaylordibe/sulayi/internal/scanner"
 	"github.com/jaylordibe/sulayi/internal/scanner/nuclei"
@@ -532,7 +534,45 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 		NotFoundCodes:    cfg.Outcome.NotFoundCodes,
 	}
 
-	fixtures := cfg.ResourceFixtures()
+	rules, err := cfg.AccessRules()
+	if err != nil {
+		return fail(ExitUsage, "%v", err)
+	}
+
+	// Records are created as each identity before anything is planned, so
+	// that what they own is known when the guard is sealed. Each creation and
+	// the deletion of what it created are the exact requests the guard is told
+	// to permit, and nothing else (ADR-0022). They are removed after the
+	// assessment whatever happens to it, including an interrupt.
+	created := record.Create(ctx, record.Options{
+		Origin:     origin(cfg.Target.BaseURL),
+		Recipes:    cfg.RecordRecipes(),
+		Identities: identities,
+		Guard:      guard,
+		Profile:    cfg.Profile(),
+	})
+	for _, c := range created {
+		if c.Problem != "" {
+			fmt.Fprintf(stderr, "sulayi: record %s as %s: %s\n", c.Recipe.Type, c.Owner, c.Problem)
+		}
+	}
+	removed := false
+	defer func() {
+		if len(created) > 0 && !removed {
+			// The run ended before its report: say here what is left behind.
+			left := record.Remove(ctx, created, identities, outcome.Signals{
+				ErrorCodePointer: cfg.Outcome.ErrorCodePointer,
+				DeniedCodes:      cfg.Outcome.DeniedCodes,
+				NotFoundCodes:    cfg.Outcome.NotFoundCodes,
+			})
+			_, incomplete := recordOutcomes(left, nil)
+			for _, f := range incomplete {
+				fmt.Fprintf(stderr, "sulayi: CLEANUP INCOMPLETE: %s\n", f)
+			}
+		}
+	}()
+
+	fixtures := append(cfg.ResourceFixtures(), record.Fixtures(created, surface.Operations, rules, identities)...)
 
 	checks := []engine.Check{
 		check.AuthRequired{
@@ -604,6 +644,8 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 		Identities:              identities,
 		Resources:               fixtures,
 		ResourceCheck:           check.CrossOwner{Signals: signals, Now: now},
+		RoleRules:               rules,
+		RoleCheck:               check.CrossRole{Signals: signals, Now: now},
 		Now:                     now,
 		Engines:                 engines,
 		EvidenceSink:            run.PutEvidence,
@@ -611,6 +653,9 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 	if err != nil {
 		return fail(ExitInternal, "%v", err)
 	}
+	created = record.Remove(ctx, created, identities, signals)
+	removed = true
+	res.Records, res.CleanupIncomplete = recordOutcomes(created, res.CleanupIncomplete)
 	res.OutOfScopeHosts = policy.OutOfScopeHosts()
 	usage := client.Usage()
 	res.Requests, res.RequestLimit, res.CleanupRequests = usage.Used, usage.Limit, usage.CleanupUsed
@@ -788,6 +833,39 @@ func newRunID(t time.Time) string {
 	return t.UTC().Format("20060102T150405Z") + "-" + hex.EncodeToString(b)
 }
 
+// recordOutcomes reports each record, adding every one that may still exist to
+// the run's incomplete cleanup.
+func recordOutcomes(created []record.Created, incomplete []string) ([]engine.RecordOutcome, []string) {
+	out := make([]engine.RecordOutcome, 0, len(created))
+	for _, c := range created {
+		problem := c.Problem
+		if c.Exists && !c.Removed {
+			problem = c.RemovalProblem
+			where := c.URL
+			if where == "" {
+				where = "an address the application did not return"
+			}
+			incomplete = append(incomplete, fmt.Sprintf("record %s created as %s at %s was not shown to be "+
+				"removed: %s", c.Recipe.Type, c.Owner, where, c.RemovalProblem))
+		}
+		out = append(out, engine.RecordOutcome{
+			Type: c.Recipe.Type, Owner: c.Owner, ID: c.ID, URL: c.URL,
+			Created: c.Exists, Removed: c.Removed, Problem: problem,
+		})
+	}
+	sort.Strings(incomplete)
+	return out, incomplete
+}
+
+// origin returns a URL's scheme and host, the base record paths resolve on.
+func origin(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 // CleanupRequestsPerWrite is the most a single cross-owner write needs after it
 // is sent: the owner's after-read, the restoring write and its verification,
 // with one to spare.
@@ -806,7 +884,20 @@ func cleanupAllowance(cfg config.Config) int {
 			writes += attackers
 		}
 	}
-	return writes * CleanupRequestsPerWrite
+	return writes*CleanupRequestsPerWrite + recordCleanup(cfg)
+}
+
+// recordCleanup is what removing every declared record can cost.
+func recordCleanup(cfg config.Config) int {
+	var n int
+	for _, r := range cfg.Records {
+		creators := len(cfg.Identities)
+		if len(r.As) > 0 {
+			creators = len(r.As)
+		}
+		n += creators * record.RequestsPerRecord
+	}
+	return n
 }
 
 // stoppedEarly says why an assessment ended before finishing its plan, or ""

@@ -169,6 +169,10 @@ type Options struct {
 	Resources []resource.Fixture
 	// ResourceCheck runs cross-owner work. Nil disables it.
 	ResourceCheck ResourceCheck
+	// RoleRules are the declared access.roles rules, and RoleCheck runs the
+	// cross-role work they plan. Either nil disables it.
+	RoleRules *access.Rules
+	RoleCheck ResourceCheck
 	// Engines is what the external scanning engines contributed, including what
 	// they failed to do.
 	Engines scanner.Collection
@@ -180,6 +184,21 @@ type Options struct {
 	// depend on the storage package. When nil, evidence is discarded and
 	// findings carry no references — which is why the CLI always supplies one.
 	EvidenceSink func(model.Exchange) (string, error)
+}
+
+// RecordOutcome is one record the run created, or tried to, and what became
+// of it.
+type RecordOutcome struct {
+	Type  string
+	Owner string
+	ID    string
+	URL   string
+	// Created is true when the application may hold the record.
+	Created bool
+	// Removed is true only when its deletion was verified by reading it again.
+	Removed bool
+	// Problem says why it was not created, or not shown to be removed.
+	Problem string
 }
 
 // Result is everything one assessment produced.
@@ -205,6 +224,9 @@ type Result struct {
 	// separate from ToolFailures because it is not about coverage: somebody's
 	// data may still be wrong.
 	CleanupIncomplete []string
+	// Records lists every record the run created, or tried to, as its
+	// identities, and whether each was removed (ADR-0022).
+	Records []RecordOutcome
 	// StoppedEarly says why the assessment ended before finishing its plan:
 	// interrupted, out of time, or out of requests. Empty means it was not.
 	StoppedEarly string
@@ -435,6 +457,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	// Cross-owner planning. Fixtures multiply operations by identities, so this
 	// is where growth is bounded; everything not planned gets a ledger row.
 	ownership := planOwnership(opts, lg)
+	ownership = append(ownership, planRoles(opts, lg, len(ownership))...)
 
 	// Registration closes before anything executes, so nothing running during
 	// the assessment can widen what the standard profile may change.
@@ -532,7 +555,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 				e := remaining.entry()
 				e.Disposition = model.DispositionBlocked
 				e.Cause = model.CauseCancelled
-				e.Detail = "the assessment was cancelled before this cross-owner unit was reached"
+				e.Detail = "the assessment was cancelled before this authorization unit was reached"
 				lg.add(e)
 			}
 			break
@@ -546,9 +569,12 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			// Serialise per fixture: two units observing one resource
 			// concurrently would interleave their reads and writes, and each
 			// would attribute the other's effect to itself.
-			lock := locks.get(u.plan.Fixture.ID)
-			lock.Lock()
-			defer lock.Unlock()
+			// A cross-role unit without a fixture touches no shared resource.
+			if u.plan.Fixture.ID != "" {
+				lock := locks.get(u.plan.Fixture.ID)
+				lock.Lock()
+				defer lock.Unlock()
+			}
 
 			out := u.rc.RunResource(ctx, u.plan)
 			meta := u.rc.MetadataFor(u.plan)
@@ -684,7 +710,10 @@ func sortResult(r *Result) {
 		if r.Findings[i].OperationID != r.Findings[j].OperationID {
 			return r.Findings[i].OperationID < r.Findings[j].OperationID
 		}
-		return r.Findings[i].CheckID < r.Findings[j].CheckID
+		if r.Findings[i].CheckID != r.Findings[j].CheckID {
+			return r.Findings[i].CheckID < r.Findings[j].CheckID
+		}
+		return r.Findings[i].ID < r.Findings[j].ID
 	})
 	sort.Slice(r.Coverage, func(i, j int) bool {
 		return r.Coverage[i].Key() < r.Coverage[j].Key()

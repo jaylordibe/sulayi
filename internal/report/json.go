@@ -60,9 +60,24 @@ type Document struct {
 
 	ToolFailures []string `json:"toolFailures"`
 	// CleanupIncomplete names fixtures that may still be modified.
-	CleanupIncomplete  []string `json:"cleanupIncomplete"`
+	CleanupIncomplete []string `json:"cleanupIncomplete"`
+	// Records lists every record the run created as its identities, and
+	// whether each was removed and the removal verified.
+	Records            []Record `json:"records"`
 	OutOfScopeHosts    []string `json:"outOfScopeHosts"`
 	ClassesNotAssessed []string `json:"classesNotAssessed"`
+}
+
+// Record is one record Sulayi created, or tried to create, through the
+// application's own API.
+type Record struct {
+	Type    string `json:"type"`
+	Owner   string `json:"owner"`
+	ID      string `json:"id,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Created bool   `json:"created"`
+	Removed bool   `json:"removed"`
+	Problem string `json:"problem,omitempty"`
 }
 
 // Tool identifies the producer.
@@ -537,6 +552,11 @@ func Build(res engine.Result, version string) Document {
 		})
 	}
 
+	doc.Records = make([]Record, 0, len(res.Records))
+	for _, r := range res.Records {
+		doc.Records = append(doc.Records, Record{Type: r.Type, Owner: r.Owner, ID: r.ID, URL: r.URL,
+			Created: r.Created, Removed: r.Removed, Problem: r.Problem})
+	}
 	doc.Adapters = buildAdapterAccount(res.Surface)
 	doc.Engines = buildEngineAccount(res.Engines)
 	doc.Ownership = Ownership{
@@ -1018,6 +1038,22 @@ func Summary(doc Document) string {
 			b.WriteString("    - " + t + "\n")
 		}
 		b.WriteString(wrap(o.Statement, 76, "  "))
+	}
+
+	// Records the run created are stated in the terminal: they are changes to
+	// the target, and one not removed is also listed under cleanup above.
+	if n := len(doc.Records); n > 0 {
+		var created, removed int
+		for _, r := range doc.Records {
+			if r.Created {
+				created++
+			}
+			if r.Removed {
+				removed++
+			}
+		}
+		b.WriteString("\n  records created through the application's API: " + strconv.Itoa(created) +
+			" of " + strconv.Itoa(n) + " declared, " + strconv.Itoa(removed) + " removed and verified gone\n")
 	}
 
 	// External engine results are stated in the terminal too.

@@ -118,6 +118,35 @@ access:
   {}
   # protected: ["/api/**", "/dashboard"]
   # public: ["/api/health", "/api/auth/**"]
+  #
+  # Records under these paths belong to the identity that created them; the
+  # roles in reachableBy may reach anyone's by design (ADR-0022). A path no
+  # rule matches gets no conclusion.
+  # owned:
+  #   - paths: ["/api/device-tokens/*"]
+  #     reachableBy: [admin]
+  #
+  # Reads only the allowed roles may call. Every other identity is compared
+  # with an allowed one; state-changing routes are never probed across roles.
+  # roles:
+  #   - paths: ["/api/users", "/api/audit-logs/**"]
+  #     allow: [admin]
+records:
+  # Records Sulayi creates as each identity through the application's own API,
+  # probes across accounts under access.owned, and deletes afterwards,
+  # verifying each is gone. safe creates none; standard sends exactly these
+  # creations and these deletions, and no other DELETE.
+  []
+  # - type: device-token
+  #   create:
+  #     path: /api/device-tokens
+  #     body:
+  #       userId: { self: true }     # the identity's own id (liveness.self)
+  #       token: { random: true }    # random per run
+  #       appPlatform: { value: web }
+  #   id: /id                        # JSON pointer to the new record's id
+  #   delete: /api/device-tokens/{id}
+  #   # as: [alice, bob]             # optional; default every identity
 resources:
   # Concrete resources known to belong to an identity, used to test whether a
   # non-owner can reach or change them. Without a fixture, addressing

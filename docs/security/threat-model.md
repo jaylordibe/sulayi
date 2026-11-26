@@ -1324,6 +1324,53 @@ way to give Sulayi that application's API. Navigation inference depends on the
 anonymous crawl not reaching a route; an application that links everything from
 public pages gives it nothing to infer.
 
+### T-25 Records Sulayi creates, and authorization across accounts and roles (S3)
+
+Sulayi now changes the target under the default profile: it creates the records
+an operator declares as each identity, probes them across accounts and probes
+declared reads across roles, and deletes what it created. Each of those is a way
+to change or destroy data, or to report a boundary that was never tested. See
+[ADR-0022](../adr/0022-authorization-across-accounts-and-roles.md).
+
+- **Standard creates and deletes only what was declared and observed.** Each
+  creation is granted as one exact POST and body, and the deletion only for the
+  URL built from the id that creation returned, each consumed on first use. No
+  other DELETE is ever permitted under `standard`, and `safe` creates nothing.
+  **TESTED** (`httpx.TestStandardPermitsOneExactCreateAndOneExactCleanup`,
+  `httpx.TestSafeIgnoresOneShotGrants`, `cli.TestS3_SafeProfileCreatesNothing`,
+  `cli.TestS3_SecureApplicationHoldsBothBoundaries`, which asserts exactly the two
+  created records were deleted).
+- **A returned id cannot move a request.** The id the application returns passes
+  the same validation and origin and base-path check as a fixture value; an id
+  that could change the URL's shape is never addressed, and the record is
+  reported as not removed. **TESTED** (`record.TestAHostileIDIsNeverAddressed`).
+- **Nothing is left behind silently.** Records are removed after the assessment,
+  after an interrupt too, on the cleanup allowance; a removal counts only when the
+  creator's read of the record answers not found. Every record is in the report,
+  and one not removed is incomplete cleanup with its address. **TESTED**
+  (`cli.TestS3_RecordNotRemovedIsReported`, `cli.TestS3_SecureApplicationHoldsBothBoundaries`).
+- **Ownership is observed, never inferred, and the expectation is declared.** A
+  record is owned because the run watched its owner create it; identifiers in
+  list responses are never used. A path no `access.owned` rule declares gets no
+  conclusion, and roles in `reachableBy` are not probed. **TESTED**
+  (`cli.TestS3_UndeclaredOwnershipConcludesNothing`,
+  `record.TestAddressesMatchesTheRecordItselfOnly`,
+  `access.TestRulesMatchFirstAndCompareRoles`, `access.TestMalformedRulesAreRefused`).
+- **A cross-account or cross-role finding is confirmed only by the existing
+  verification.** Cross-account reads use ADR-0013's owner control, re-check and
+  resource identity unchanged; a cross-role read is confirmed only when an
+  allowed identity succeeded and the other received a materially equivalent
+  response, and a refusal is a verified denial. **TESTED**
+  (`cli.TestS3_VulnerableApplicationIsConfirmedAcrossAccountsAndRoles`,
+  `cli.TestS3_SecureApplicationHoldsBothBoundaries`).
+- **No state-changing route is probed across roles.** Only GET is planned; a
+  state-changing route under a role rule is an untested ledger row. **TESTED**
+  (`cli.TestS3_VulnerableApplicationIsConfirmedAcrossAccountsAndRoles`).
+
+**Limits.** With one account per role, cross-account coverage runs between
+identities of different roles, so a role in `reachableBy` leaves one direction.
+An application whose delete is soft keeps a row its API reports as gone.
+
 ## 3. Residual risk accepted at this stage
 
 Stated plainly rather than left for a reader to discover.

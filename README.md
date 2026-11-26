@@ -139,7 +139,7 @@ compare against. [Add identities](#identities) and the same defect can be confir
 | Source analysis with your own opengrep/Semgrep rules | Experimental — Semgrep itself never executed |
 | Nuclei and ZAP integrations | Built, **currently blocked** (see [Safety](#safety)) |
 | Signing in through the app's own login: bearer token or cookie session (with CSRF), `--env` credentials files, roles, bounded re-authentication | Implemented — bearer logins are run against the Laravel Passport and NestJS JWT reference starters by the reference workflow; cookie sessions and CSRF are tested on local fixtures only |
-| Testing across roles (function-level authorization) | Planned |
+| Testing across accounts and roles from records Sulayi creates and deletes itself, against declared ownership and role rules | Implemented — validated on local fixtures; the reference-starter run is pending |
 | Testing applications without an OpenAPI document: framework adapters, browser recordings (HAR, discovery only) and a bounded same-origin crawler, with a declared access policy as the oracle | Implemented — the crawler reads server-rendered links only; a single-page app's API comes from a HAR |
 | Injection and misconfiguration checks | Planned |
 | `sulayi report`, `sulayi verify <finding-id>` | Planned |
@@ -283,6 +283,39 @@ resources:
 A fixture applies only to operations that name the object, never to collections or health
 endpoints. A write is confirmed only by the owner's own view changing, never by a `200`,
 and the changed fields are restored afterwards.
+
+### Records Sulayi creates, and roles
+
+Instead of writing fixtures by hand, declare how to create a record. Sulayi creates one as
+each identity, has the others try to read it, and deletes it afterwards, checking that it
+is gone ([ADR-0022](docs/adr/0022-authorization-across-accounts-and-roles.md)):
+
+```yaml
+records:
+  - type: device-token
+    create:
+      path: /api/device-tokens
+      body:
+        userId: { self: true }           # the creating identity's own id (liveness.self)
+        token: { random: true }          # random per run
+        appPlatform: { value: web }      # a literal
+    id: /id                              # JSON pointer to the new record's id
+    delete: /api/device-tokens/{id}
+
+access:
+  owned:                                 # records here belong to their creator
+    - paths: ["/api/device-tokens/*"]
+      reachableBy: [admin]               # roles that may reach anyone's, by design
+  roles:                                 # reads only these roles may call
+    - paths: ["/api/users", "/api/audit-logs/**"]
+      allow: [admin]
+```
+
+An identity's own id comes from its canary: `liveness: { path: /api/users/me, self: /id }`.
+A path no rule declares gets no conclusion. Under `standard`, the only state-changing
+requests are each declared creation and the deletion of exactly what it created; `safe`
+creates nothing. Every record is listed in the report, and one not removed is reported as
+incomplete cleanup with its address. Routes are compared across roles with GET only.
 
 ---
 

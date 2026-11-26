@@ -1,10 +1,12 @@
 package httpx
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -40,6 +42,9 @@ func (e *ErrRefused) Error() string {
 //     registered fixture request: the same method, the same URL (path and
 //     query), and a JSON object body whose fields are all fields that fixture
 //     was registered to change. DELETE is never permitted.
+//   - standard also permits a record Sulayi creates and its removal: one exact
+//     POST and, once that record exists, one exact DELETE of it, each consumed
+//     on first use (ADR-0022). No other DELETE is permitted.
 //   - aggressive permits every state-changing request. Scope still applies.
 //
 // Grants are registered before the assessment executes and then sealed, so
@@ -54,6 +59,9 @@ type Guard struct {
 	// auth are the exact authentication requests permitted in every profile:
 	// an identity's configured login and preflight, and nothing else.
 	auth map[string]map[string]struct{}
+	// once are one-shot grants for a record Sulayi creates and deletes:
+	// the exact body each permits, consumed by the first request that matches.
+	once map[string][]byte
 }
 
 type stateChangingRule struct {
@@ -70,7 +78,8 @@ func NewGuard(profile model.Profile, stateChanging []string) (*Guard, error) {
 	if !profile.Valid() {
 		return nil, fmt.Errorf("httpx: invalid profile %q", profile)
 	}
-	g := &Guard{profile: profile, grants: map[string]map[string]struct{}{}, auth: map[string]map[string]struct{}{}}
+	g := &Guard{profile: profile, grants: map[string]map[string]struct{}{},
+		auth: map[string]map[string]struct{}{}, once: map[string][]byte{}}
 	for _, id := range stateChanging {
 		if err := g.AddStateChangingTemplate(id); err != nil {
 			return nil, err
@@ -132,6 +141,61 @@ func (g *Guard) Grant(method, rawURL string, fields []string) error {
 		set[f] = struct{}{}
 	}
 	return nil
+}
+
+// GrantCreate registers the one POST that creates a declared record: this URL
+// and exactly this body, permitted once.
+func (g *Guard) GrantCreate(rawURL string, body []byte) error {
+	if len(body) == 0 {
+		return errors.New("httpx: a record creation must carry a body")
+	}
+	return g.grantOnce(http.MethodPost, rawURL, body)
+}
+
+// GrantCleanup registers the one DELETE that removes a record this run
+// created: this exact URL with no body, permitted once. It is the only DELETE
+// the standard profile ever sends, and the caller registers it only for the
+// address of a record whose creation it observed succeed.
+func (g *Guard) GrantCleanup(rawURL string) error {
+	return g.grantOnce(http.MethodDelete, rawURL, nil)
+}
+
+func (g *Guard) grantOnce(method, rawURL string, body []byte) error {
+	key, err := grantKey(method, rawURL)
+	if err != nil {
+		return err
+	}
+	// Aggressive permits every state-changing request and never consults
+	// these grants, so recording one would only leave it unconsumed.
+	if g.profile == model.ProfileAggressive {
+		return nil
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.sealed {
+		return errors.New("httpx: the safety guard is sealed")
+	}
+	if _, dup := g.once[key]; dup {
+		return fmt.Errorf("httpx: %s %s is already granted once", method, rawURL)
+	}
+	g.once[key] = append([]byte{}, body...)
+	return nil
+}
+
+// takeOnce consumes a one-shot grant matching the request exactly.
+func (g *Guard) takeOnce(method, rawURL string, body []byte) bool {
+	key, err := grantKey(method, rawURL)
+	if err != nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	want, ok := g.once[key]
+	if !ok || !bytes.Equal(want, body) {
+		return false
+	}
+	delete(g.once, key)
+	return true
 }
 
 // AllowAuthentication registers one identity's configured authentication
@@ -236,6 +300,9 @@ func (g *Guard) check(method, rawURL string, body []byte, authentication bool) e
 	case model.ProfileAggressive:
 		return nil
 	case model.ProfileStandard:
+		if g.takeOnce(method, rawURL, body) {
+			return nil
+		}
 		if method == "DELETE" {
 			return refuse("the standard profile never sends DELETE")
 		}

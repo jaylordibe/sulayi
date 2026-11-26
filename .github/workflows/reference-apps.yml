@@ -76,6 +76,22 @@ jobs:
             jq '.identities | map({id, role, usable, liveness, problem})' "$report"
             exit 1; }
 
+      - name: test authorization across accounts
+        # Same run as the sign-in step. Each account created its records, the
+        # other probed them, and every record was deleted and verified gone
+        # (ADR-0022). The starter enforces these boundaries, so nothing is found.
+        run: |
+          report=$(ls "$RUNNER_TEMP"/login-run/runs/*/report.json)
+          jq -e '(.records | length == 2) and all(.records[]; .created and .removed) and
+              (.cleanupIncomplete | length == 0) and
+              ([.coverage[] | select(.dimension == "ownership" and .disposition == "executed")] | length >= 2) and
+              ([.findings[] | select(.checkId | startswith("cross-"))] | length == 0)' "$report" || {
+            echo "::error::authorization across accounts did not run cleanly"
+            jq '{records, cleanupIncomplete,
+                  rows: [.coverage[] | select(.dimension == "ownership" or .dimension == "role") | {dimension, subject, identityId, disposition, cause, detail}],
+                  findings: [.findings[] | select(.checkId | startswith("cross-")) | {checkId, operationId, identityId, state}]}' "$report"
+            exit 1; }
+
       - name: assess it without its specification
         # The spec-less path: the Laravel adapter's routing table and the crawl
         # are the surface, the access policy is the oracle. Operations must be
@@ -167,4 +183,21 @@ jobs:
           jq -e '[.identities[] | select(.usable and .liveness == "good")] | length == 2' "$report" || {
             echo "::error::the seeded accounts did not both sign in"
             jq '.identities | map({id, role, usable, liveness, problem})' "$report"
+            exit 1; }
+
+      - name: test authorization across accounts and roles
+        # Same run as the sign-in step. Each account created its records, the
+        # other probed them, and every record was deleted and verified gone
+        # (ADR-0022). The starter enforces these boundaries, so nothing is found.
+        run: |
+          report=$(ls "$RUNNER_TEMP"/login-run/runs/*/report.json)
+          jq -e '(.records | length == 4) and all(.records[]; .created and .removed) and
+              (.cleanupIncomplete | length == 0) and
+              ([.coverage[] | select(.dimension == "ownership" and .disposition == "executed")] | length >= 2) and
+              ([.coverage[] | select(.dimension == "role" and .disposition == "executed")] | length >= 1) and
+              ([.findings[] | select(.checkId | startswith("cross-"))] | length == 0)' "$report" || {
+            echo "::error::authorization across accounts did not run cleanly"
+            jq '{records, cleanupIncomplete,
+                  rows: [.coverage[] | select(.dimension == "ownership" or .dimension == "role") | {dimension, subject, identityId, disposition, cause, detail}],
+                  findings: [.findings[] | select(.checkId | startswith("cross-")) | {checkId, operationId, identityId, state}]}' "$report"
             exit 1; }

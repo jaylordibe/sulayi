@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jaylordibe/sulayi/internal/httpx"
+	"github.com/jaylordibe/sulayi/internal/jsonpointer"
 	"github.com/jaylordibe/sulayi/internal/model"
 	"github.com/jaylordibe/sulayi/internal/redact"
 )
@@ -144,6 +145,9 @@ type Control struct {
 	signedIn bool
 	reauths  int
 	windows  []Window
+	// selfID is the identity's own id, read from the canary's response when
+	// liveness.self is configured.
+	selfID string
 	// probing serialises canary probes so that a burst of suspicious responses
 	// produces one probe rather than one per goroutine.
 	probing bool
@@ -151,6 +155,17 @@ type Control struct {
 
 // ID returns the identity id.
 func (c *Control) ID() string { return c.id.ID }
+
+// Role returns the identity's configured role, or "" when none is.
+func (c *Control) Role() string { return c.id.Role }
+
+// SelfID returns the identity's own id in the application, as read from its
+// last accepted canary response, and whether one was read.
+func (c *Control) SelfID() (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.selfID, c.selfID != ""
+}
 
 // Status returns a snapshot for reporting.
 func (c *Control) Status() Status {
@@ -446,6 +461,11 @@ func (c *Control) probeOnce(ctx context.Context) (LivenessState, int) {
 	case c.id.Live.Accepts(ex.Response.Status):
 		c.state = LivenessGood
 		c.lastGood = time.Now()
+		if c.id.Live.Self != "" {
+			if v, ok := jsonpointer.String(ex.Response.Body, c.id.Live.Self); ok {
+				c.selfID = v
+			}
+		}
 		c.problem = ""
 		return c.state, ex.Response.Status
 	default:

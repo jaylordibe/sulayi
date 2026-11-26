@@ -30,6 +30,7 @@ import (
 	"github.com/jaylordibe/sulayi/internal/discovery"
 	"github.com/jaylordibe/sulayi/internal/identity"
 	"github.com/jaylordibe/sulayi/internal/model"
+	"github.com/jaylordibe/sulayi/internal/record"
 	"github.com/jaylordibe/sulayi/internal/resource"
 	"github.com/jaylordibe/sulayi/internal/scanner"
 	"github.com/jaylordibe/sulayi/internal/scope"
@@ -80,6 +81,7 @@ type Config struct {
 	Assessment  Assessment  `yaml:"assessment"`
 	Identities  []Identity  `yaml:"identities"`
 	Resources   []Resource  `yaml:"resources"`
+	Records     []Record    `yaml:"records"`
 	Adapters    Adapters    `yaml:"adapters"`
 	Engines     Engines     `yaml:"engines"`
 	Discovery   Discovery   `yaml:"discovery"`
@@ -269,6 +271,38 @@ type LivenessProbe struct {
 	// ExpectStatus lists statuses meaning the identity is still good. Empty
 	// means any 2xx.
 	ExpectStatus []int `yaml:"expectStatus"`
+	// Self is a JSON pointer to the identity's own id in the response, used
+	// in record creation bodies.
+	Self string `yaml:"self"`
+}
+
+// Record declares a kind of record Sulayi creates as each identity, uses as
+// that identity's owned resource, and deletes afterwards (ADR-0022).
+type Record struct {
+	// Type names the kind of record, e.g. device-token.
+	Type string `yaml:"type"`
+	// Create is the request that creates one.
+	Create RecordCreate `yaml:"create"`
+	// ID is a JSON pointer to the new record's id in the creation response.
+	ID string `yaml:"id"`
+	// Delete is the path of one record, with exactly one {param}: its id.
+	Delete string `yaml:"delete"`
+	// As lists the identities that each create one. Empty means every one.
+	As []string `yaml:"as"`
+}
+
+// RecordCreate is a POST of a JSON object to a path on the target's origin.
+type RecordCreate struct {
+	Path string                 `yaml:"path"`
+	Body map[string]RecordValue `yaml:"body"`
+}
+
+// RecordValue is one body field: a literal value, the creating identity's own
+// id (self), or a value random per run. It can never reference a credential.
+type RecordValue struct {
+	Value  any  `yaml:"value"`
+	Self   bool `yaml:"self"`
+	Random bool `yaml:"random"`
 }
 
 // Resource is one concrete resource known to belong to an identity.
@@ -444,6 +478,23 @@ type CrawlDiscovery struct {
 type Access struct {
 	Protected []string `yaml:"protected"`
 	Public    []string `yaml:"public"`
+	// Owned declares paths whose records belong to the identity that created
+	// them, and the roles that may reach other identities' records by design.
+	Owned []OwnedAccess `yaml:"owned"`
+	// Roles declares paths only the roles it allows may call.
+	Roles []RoleAccess `yaml:"roles"`
+}
+
+// OwnedAccess is one access.owned rule.
+type OwnedAccess struct {
+	Paths       []string `yaml:"paths"`
+	ReachableBy []string `yaml:"reachableBy"`
+}
+
+// RoleAccess is one access.roles rule.
+type RoleAccess struct {
+	Paths []string `yaml:"paths"`
+	Allow []string `yaml:"allow"`
 }
 
 // SurfaceDiscovery configures the discovery of undocumented surface.
@@ -733,6 +784,30 @@ func (c *Config) Validate() error {
 		}
 	}
 	problems = append(problems, resource.ValidateAll(c.ResourceFixtures(), known)...)
+	if _, err := c.AccessRules(); err != nil {
+		problems = append(problems, err.Error())
+	}
+	// Under ownership or role rules, an identity's role decides whether it is
+	// probed and what its access means. One without a role would be treated
+	// as allowed nothing, so an administrator configured without one would
+	// produce findings against access it legitimately has.
+	if len(c.Access.Owned) > 0 || len(c.Access.Roles) > 0 {
+		for i, id := range c.Identities {
+			if id.Role == "" {
+				problems = append(problems, fmt.Sprintf("identities[%d].role is required when access.owned "+
+					"or access.roles is declared: the rules are stated per role", i))
+			}
+		}
+	}
+	types := map[string]int{}
+	for i, r := range c.RecordRecipes() {
+		path := fmt.Sprintf("records[%d]", i)
+		problems = append(problems, r.Validate(path, known)...)
+		if first, dup := types[r.Type]; dup && r.Type != "" {
+			problems = append(problems, fmt.Sprintf("%s.type %q duplicates records[%d]", path, r.Type, first))
+		}
+		types[r.Type] = i
+	}
 	problems = append(problems, c.validateAdapters()...)
 	problems = append(problems, c.validateEngines()...)
 
@@ -772,6 +847,7 @@ func (c Config) IdentityModels() []identity.Identity {
 				Method:       i.Liveness.Method,
 				Path:         i.Liveness.Path,
 				ExpectStatus: i.Liveness.ExpectStatus,
+				Self:         i.Liveness.Self,
 			}
 		}
 		out = append(out, id)
@@ -998,9 +1074,8 @@ func (c Config) ResourceFixtures() []resource.Fixture {
 			Operations:       r.Operations,
 			NonOwners:        r.NonOwners,
 			Disposable:       r.Disposable,
-			// Everything configurable is, by definition, configured. Resources
-			// created through the application's own API would carry
-			// ProvenanceAPICreated, and M2 does not create any.
+			// Everything configurable is, by definition, configured. Records
+			// Sulayi creates (records[]) carry ProvenanceAPICreated.
 			Provenance: resource.ProvenanceConfigured,
 		}
 		if r.Mutation != nil {
@@ -1140,4 +1215,33 @@ func (c Config) CrawlLimits() (pages, depth int) {
 // checked every pattern.
 func (c Config) AccessPolicy() (*access.Policy, error) {
 	return access.New(c.Access.Protected, c.Access.Public)
+}
+
+// AccessRules compiles access.owned and access.roles.
+func (c Config) AccessRules() (*access.Rules, error) {
+	owned := make([]access.OwnedSpec, 0, len(c.Access.Owned))
+	for _, o := range c.Access.Owned {
+		owned = append(owned, access.OwnedSpec{Paths: o.Paths, ReachableBy: o.ReachableBy})
+	}
+	roles := make([]access.RoleSpec, 0, len(c.Access.Roles))
+	for _, r := range c.Access.Roles {
+		roles = append(roles, access.RoleSpec{Paths: r.Paths, Allow: r.Allow})
+	}
+	return access.NewRules(owned, roles)
+}
+
+// RecordRecipes maps records[] onto creation recipes.
+func (c Config) RecordRecipes() []record.Recipe {
+	out := make([]record.Recipe, 0, len(c.Records))
+	for _, r := range c.Records {
+		body := make(map[string]record.Value, len(r.Create.Body))
+		for k, v := range r.Create.Body {
+			body[k] = record.Value{Literal: v.Value, Self: v.Self, Random: v.Random}
+		}
+		out = append(out, record.Recipe{
+			Type: r.Type, CreatePath: r.Create.Path, Body: body,
+			IDPointer: r.ID, DeletePath: r.Delete, As: r.As,
+		})
+	}
+	return out
 }

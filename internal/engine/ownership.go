@@ -23,6 +23,10 @@ import (
 // second whenever they see the first.
 const DimensionOwnership = "ownership"
 
+// DimensionRole is the ledger dimension for cross-role work: whether an
+// identity of a role a declared rule does not allow was refused a route.
+const DimensionRole = "role"
+
 // MaxOwnershipUnits bounds how much cross-owner work one run will plan.
 //
 // Fixtures multiply: every fixture applies to every operation it can address,
@@ -56,10 +60,15 @@ type ResourceCheck interface {
 type ownershipUnit struct {
 	plan check.ResourcePlan
 	rc   ResourceCheck
+	// role marks a cross-role unit, which has no owned resource.
+	role bool
 }
 
 // entry renders the unit's base ledger row.
 func (u ownershipUnit) entry() model.CoverageEntry {
+	if u.role {
+		return roleRow(u.plan, u.rc, "", "", "")
+	}
 	return model.CoverageEntry{
 		Dimension:       DimensionOwnership,
 		Subject:         u.plan.Subject(),
@@ -246,6 +255,134 @@ func planOwnership(opts Options, lg *ledger) []ownershipUnit {
 		}
 	}
 	return units
+}
+
+// planRoles expands access.roles rules into cross-role units: for each read
+// under a rule, every identity whose role is not allowed is compared with one
+// whose role is. Only GET is planned; a state-changing route under a rule is
+// recorded as untested rather than probed, because proving it reachable would
+// do what it does. A path no rule matches has no expectation and is not
+// planned. planned counts the units already planned, for the shared bound.
+func planRoles(opts Options, lg *ledger, planned int) []ownershipUnit {
+	if opts.RoleCheck == nil || !opts.RoleRules.HasRoles() || opts.Identities == nil {
+		return nil
+	}
+	fixtures := make([]resource.Fixture, len(opts.Resources))
+	copy(fixtures, opts.Resources)
+	resource.SortFixtures(fixtures)
+
+	var units []ownershipUnit
+	for _, op := range opts.Surface.Operations {
+		rule, ok := opts.RoleRules.Role(op.AbsolutePath())
+		if !ok {
+			continue
+		}
+		var allowed, others []*identity.Control
+		for _, c := range opts.Identities.Controls() {
+			if rule.Allows(c.Role()) {
+				allowed = append(allowed, c)
+			} else {
+				others = append(others, c)
+			}
+		}
+		if len(others) == 0 {
+			continue
+		}
+		base := check.ResourcePlan{Operation: op}
+		if len(allowed) > 0 {
+			base.Owner = allowed[0]
+		}
+		skip := func(d model.Disposition, cause model.BlockedCause, detail string) {
+			for _, a := range others {
+				p := base
+				p.Attacker = a
+				e := roleRow(p, opts.RoleCheck, d, cause, detail)
+				lg.add(e)
+			}
+		}
+		if op.Method != "GET" || op.IsStateChanging(opts.StateChangingOperations) {
+			skip(model.DispositionUntested, model.CauseSafetyPolicy, fmt.Sprintf("%s is under an "+
+				"access.roles rule, but only reads are probed across roles: proving a state-changing route "+
+				"reachable would perform it", op.ID))
+			continue
+		}
+		if op.MatchesAnyID(opts.ExcludeOperations) {
+			skip(model.DispositionUntested, model.CauseSafetyPolicy, "excluded by configuration")
+			continue
+		}
+		// The same rule as operation planning: a sign-out or other
+		// authentication route requested as the baseline identity could end
+		// the session every later unit, and the cleanup, depends on.
+		if opts.ExcludeAuthEndpoints &&
+			(model.LooksLikeAuthRoute(op.PathTemplate) || model.LooksLikeAuthRoute(op.AbsolutePath())) {
+			skip(model.DispositionUntested, model.CauseSafetyPolicy, "skipped because the path looks like "+
+				"an authentication or sign-out route; requesting it could end the session the run depends on")
+			continue
+		}
+		if base.Owner == nil {
+			skip(model.DispositionBlocked, model.CauseNoOracle, fmt.Sprintf("no configured identity has "+
+				"a role access.roles allows for %s (%v), so there is no baseline to compare with",
+				op.ID, rule.Allow))
+			continue
+		}
+		u, fixtureID, err := roleURL(op, fixtures)
+		if err != nil {
+			skip(model.DispositionBlocked, model.CauseMissingResource, "no record or fixture can fill "+
+				"this route's path parameters: "+err.Error())
+			continue
+		}
+		base.URL = u
+		base.Fixture = resource.Fixture{ID: fixtureID}
+		for _, a := range others {
+			p := base
+			p.Attacker = a
+			if planned+len(units) >= MaxOwnershipUnits {
+				lg.add(roleRow(p, opts.RoleCheck, model.DispositionUntested, model.CauseSafetyPolicy,
+					fmt.Sprintf("this run planned more than %d authorization units and stopped expanding",
+						MaxOwnershipUnits)))
+				continue
+			}
+			units = append(units, ownershipUnit{plan: p, rc: opts.RoleCheck, role: true})
+		}
+	}
+	return units
+}
+
+// roleURL addresses a route: directly when it has no path parameter, or
+// through the first fixture that names it in its operations.
+func roleURL(op model.Operation, fixtures []resource.Fixture) (string, string, error) {
+	if len(op.RequiredPathParams()) == 0 {
+		b, err := resource.Bind(op, nil)
+		return b.URL, "", err
+	}
+	var last error = fmt.Errorf("no fixture or created record applies to it")
+	for _, f := range fixtures {
+		// A fixture fills a route only where it applies: filling parameters by
+		// name alone would put a device token's id into an audit-log route.
+		if !f.AppliesTo(op) || len(f.Operations) == 0 {
+			continue
+		}
+		b, err := resource.Bind(op, f.Values)
+		if err == nil {
+			return b.URL, f.ID, nil
+		}
+		last = err
+	}
+	return "", "", last
+}
+
+// roleRow renders a cross-role ledger row.
+func roleRow(p check.ResourcePlan, rc ResourceCheck, d model.Disposition, cause model.BlockedCause, detail string) model.CoverageEntry {
+	return model.CoverageEntry{
+		Dimension:   DimensionRole,
+		Subject:     p.Subject(),
+		CheckID:     rc.MetadataFor(p).ID,
+		IdentityID:  attackerID(p),
+		ResourceID:  p.Fixture.ID,
+		Disposition: d,
+		Cause:       cause,
+		Detail:      detail,
+	}
 }
 
 // planRow renders a ledger row for a unit that will not run.

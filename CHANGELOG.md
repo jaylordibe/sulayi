@@ -35,6 +35,16 @@ consumer can detect a change rather than misparse.
 
 ### Added
 
+- **Authorization across accounts and roles**
+  ([ADR-0022](docs/adr/0022-authorization-across-accounts-and-roles.md)). `records[]`
+  declares how to create a record; Sulayi creates one as each identity, probes it from the
+  others through the existing cross-owner read check, and deletes it afterwards, verifying
+  each is gone. `access.owned` and `access.roles` declare which records belong to their
+  creator and which reads only some roles may call; a new `cross-role-read` check compares
+  each other identity with an allowed one. `liveness.self` reads an identity's own id. The
+  report gains `records`, and the ledger a `role` dimension. Under `standard`, the guard
+  permits each declared creation and the deletion of exactly what it created, once each.
+
 - The runs directory writes its own `.gitignore`, so evidence is not committed from a
   repository whose ignore rules predate the rename.
 - **State-changing requests are decided in `httpx.Do`.** Under `standard`, only exact
