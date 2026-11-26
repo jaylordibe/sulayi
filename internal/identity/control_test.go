@@ -523,3 +523,18 @@ func TestCredentialIsNeverSentToAnotherInScopeOrigin(t *testing.T) {
 		t.Fatalf("the in-scope sibling origin received %d request(s); leaked = %v", siblingHits.Load(), leaked.Load())
 	}
 }
+
+// A clock with coarse resolution can stamp the last good canary and the first
+// bad one with the same instant. Two equal timestamps cannot be ordered, so a
+// request completed at that instant is treated as untrusted: wrongly trusting
+// it could keep a corroboration resting on a dead credential.
+func TestWindowContainsAnInstantEqualToItsStart(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0)
+	w := Window{From: at, FirstBad: at, To: at.Add(time.Second)}
+	if !w.Contains(at) {
+		t.Error("an instant equal to the last good canary was treated as trusted")
+	}
+	if w.Contains(at.Add(-time.Nanosecond)) {
+		t.Error("an instant before the last good canary was treated as untrusted")
+	}
+}

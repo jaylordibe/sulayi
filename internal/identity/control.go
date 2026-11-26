@@ -86,10 +86,12 @@ type Window struct {
 }
 
 // Contains reports whether an authenticated request completed at t falls in
-// the window: after the last confirmed-good canary, and before the identity
-// was confirmed good again.
+// the window: from the last confirmed-good canary until the identity was
+// confirmed good again. An instant equal to the last good canary is inside: a
+// coarse clock can give the canary and a later request the same timestamp, and
+// two equal timestamps cannot be ordered.
 func (w Window) Contains(t time.Time) bool {
-	if !w.From.IsZero() && !t.After(w.From) {
+	if !w.From.IsZero() && t.Before(w.From) {
 		return false
 	}
 	return w.To.IsZero() || !t.After(w.To)
@@ -98,8 +100,8 @@ func (w Window) Contains(t time.Time) bool {
 // UncertaintyWindow reports the interval in which authenticated results cannot
 // be trusted, and whether one exists.
 //
-// A result whose authenticated request completed at or before LastGood is
-// backed by a credential a canary confirmed afterwards. A result after LastGood,
+// A result whose authenticated request completed before LastGood is backed by
+// a credential a canary confirmed afterwards. A result after LastGood,
 // once FirstBad is known, may have been produced by a credential that had
 // already expired.
 func (s Status) UncertaintyWindow() (from time.Time, to time.Time, ok bool) {
