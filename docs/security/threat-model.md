@@ -64,6 +64,10 @@ same address; DNS names that resolve to loopback.
   `https://api.example.com` does not authorize `http://api.example.com:9200`.
   **TESTED** (`scope.TestHostAllowlistIsExact`, `TestPortIsPartOfScope`,
   `TestPathPrefixConfinesGrant`).
+- An OpenAPI `servers` entry contributes only its path. Operations are always addressed to
+  the target the operator named, so a document cannot redirect them to another host, and a
+  replaced host is reported as a warning. **TESTED**
+  (`openapi.TestServerURLContributesOnlyItsPath`).
 - The URL is evaluated **before any name resolution**, so an out-of-scope host generates no
   DNS traffic — resolving a host in order to reject it would itself be a callback to
   attacker-controlled infrastructure. **TESTED** (`httpx.TestOutOfScopeURLSendsNoPacket`,

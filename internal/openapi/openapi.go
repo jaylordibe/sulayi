@@ -502,9 +502,48 @@ func resolveBase(servers []server, baseURL string, res *Result) string {
 		// A relative server is a path prefix on the target origin.
 		return strings.TrimRight(baseURL, "/") + "/" + strings.Trim(u.Path, "/")
 	}
-	// An absolute server URL is a fact from an untrusted document. It is kept,
-	// but scope still decides whether it may be contacted.
-	return strings.TrimRight(u.String(), "/")
+	// An absolute server URL comes from an untrusted document, and the URL the
+	// operator gave is the authorization: the document contributes its path,
+	// never the host. A specification written for localhost, or for the
+	// production host, still describes the target the operator named.
+	target, err := url.Parse(baseURL)
+	if err != nil || !target.IsAbs() {
+		return strings.TrimRight(baseURL, "/")
+	}
+	if !sameOrigin(u, target) {
+		// The document's host is not echoed: it is untrusted text.
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"servers[0].url names another origin; operations are sent to the target %s://%s, keeping only its path",
+			target.Scheme, target.Host))
+	}
+	// A target given with a path is mounted there, as it is for a relative
+	// server. A server path that already carries the mount is not prefixed
+	// twice.
+	mount := strings.TrimRight(target.Path, "/")
+	path := strings.TrimRight(u.Path, "/")
+	if mount != "" && path != mount && !strings.HasPrefix(path, mount+"/") {
+		path = mount + path
+	}
+	return strings.TrimRight((&url.URL{Scheme: target.Scheme, Host: target.Host, Path: path}).String(), "/")
+}
+
+// sameOrigin compares scheme, host and effective port, so that an explicit
+// default port or a difference in case is not reported as a different host.
+func sameOrigin(a, b *url.URL) bool {
+	port := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			return p
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "https":
+			return "443"
+		case "http":
+			return "80"
+		}
+		return ""
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Hostname(), b.Hostname()) &&
+		port(a) == port(b)
 }
 
 // gradeFidelity assesses how much information the declared security carries.

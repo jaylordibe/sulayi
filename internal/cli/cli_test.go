@@ -1337,3 +1337,61 @@ func TestUnreachableTargetAborts(t *testing.T) {
 		}
 	}
 }
+
+// A single-page application serves its index page for every unknown path, so
+// a well-known specification path answers 200 with HTML. That is an absence:
+// the run goes on with the recording the operator supplied. A non-HTML body
+// that fails to parse is still a malformed document and stops the run.
+func TestSinglePageFallbackAtAWellKnownPathIsAnAbsence(t *testing.T) {
+	for _, tc := range []struct {
+		name, contentType, body string
+		wantStopped             bool
+	}{
+		{"html fallback", "text/html; charset=UTF-8", "<!doctype html><html><body>app</body></html>", false},
+		{"malformed json", "application/json", `{"openapi": "3.0.3", "paths": `, true},
+		{"valid document served as html", "text/html; charset=utf-8",
+			`{"openapi":"3.0.3","info":{"title":"t","version":"1"},"paths":{"/api/items":{"get":{"security":[{"bearer":[]}]}}}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var assessed atomic.Bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/items" {
+					assessed.Store(true)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`[]`))
+					return
+				}
+				w.Header().Set("Content-Type", tc.contentType)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			dir := t.TempDir()
+			t.Chdir(dir)
+			har := `{"log":{"entries":[{"request":{"method":"GET","url":"` + srv.URL + `/api/items"}}]}}`
+			cfg := "apiVersion: sulayi/v1alpha1\ntarget:\n  baseURL: " + srv.URL + "\n" +
+				"scope:\n  allowPrivateAddresses: true\n" +
+				"discovery:\n  crawl: {enabled: false}\n" +
+				"access:\n  protected: [\"/api/**\"]\n"
+			for name, body := range map[string]string{"sulayi.yaml": cfg, "app.har": har} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, out, errOut := run(t, "attack", "--har", "app.har")
+			stopped := strings.Contains(errOut, "could not be parsed")
+			if stopped != tc.wantStopped {
+				t.Fatalf("stopped on a parse failure = %v, want %v\n%s\n%s", stopped, tc.wantStopped, out, errOut)
+			}
+			if !tc.wantStopped {
+				surface, _ := latestReport(t)["surface"].(map[string]any)
+				want := tc.name == "valid document served as html"
+				if got, _ := surface["specDerived"].(bool); got != want {
+					t.Errorf("specDerived = %v, want %v\n%s\n%s", got, want, out, errOut)
+				}
+			}
+			if !tc.wantStopped && !assessed.Load() {
+				t.Errorf("the recorded route was not assessed after the fallback\n%s\n%s", out, errOut)
+			}
+		})
+	}
+}

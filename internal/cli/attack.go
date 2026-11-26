@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -746,7 +747,7 @@ func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now 
 		source = openapi.SourceAt(model.SourceOpenAPIFile, path, now())
 
 	case cfg.Discovery.OpenAPIURL != "":
-		data, err := fetchSpec(ctx, client, cfg.Discovery.OpenAPIURL)
+		data, _, err := fetchSpec(ctx, client, cfg.Discovery.OpenAPIURL)
 		if err != nil {
 			return engine.Surface{}, err
 		}
@@ -768,7 +769,7 @@ func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now 
 		var unreachable error
 		for _, p := range openapi.WellKnownPaths() {
 			candidate := base + p
-			data, err := fetchSpec(ctx, client, candidate)
+			data, contentType, err := fetchSpec(ctx, client, candidate)
 			var status *specStatusError
 			if err == nil || errors.As(err, &status) {
 				responded = true
@@ -786,6 +787,14 @@ func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now 
 				continue
 			}
 			if _, perr := openapi.Parse(data, cfg.Target.BaseURL, model.Source{}); perr != nil {
+				// A single-page application answers every unknown path with its
+				// index page. An HTML page at a guessed path that is not a
+				// specification is that fallback, not a malformed document, so
+				// it is an absence. A valid document served as HTML is still
+				// used, and one the operator named is parsed whatever it is.
+				if mt, _, _ := mime.ParseMediaType(contentType); mt == "text/html" {
+					continue
+				}
 				// A target serving only a malformed document should be told it
 				// was malformed, not that nothing was found.
 				if parseFailure == nil {
@@ -854,22 +863,23 @@ func discover(ctx context.Context, cfg config.Config, client *httpx.Client, now 
 	}, nil
 }
 
-func fetchSpec(ctx context.Context, client *httpx.Client, rawURL string) ([]byte, error) {
+// fetchSpec returns the document's body and the Content-Type it was served with.
+func fetchSpec(ctx context.Context, client *httpx.Client, rawURL string) ([]byte, string, error) {
 	ex, err := client.Do(ctx, httpx.Request{
 		Method: "GET",
 		URL:    rawURL,
 		Header: map[string][]string{"Accept": {"application/json, application/yaml, */*"}},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("cannot fetch specification: %w", err)
+		return nil, "", fmt.Errorf("cannot fetch specification: %w", err)
 	}
 	if ex.Response == nil {
-		return nil, errors.New("the specification request got no response")
+		return nil, "", errors.New("the specification request got no response")
 	}
 	if ex.Response.Status < 200 || ex.Response.Status > 299 {
-		return nil, &specStatusError{status: ex.Response.Status}
+		return nil, "", &specStatusError{status: ex.Response.Status}
 	}
-	return ex.Response.Body, nil
+	return ex.Response.Body, ex.Response.HeaderValue("Content-Type"), nil
 }
 
 // specStatusError is a specification request the target answered with a

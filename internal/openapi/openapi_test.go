@@ -230,3 +230,50 @@ func TestWellKnownPathsCoverBothNestJSLocations(t *testing.T) {
 		}
 	}
 }
+
+// The URL the operator gave is the authorization. A document's server entry
+// contributes its path; its host, scheme and port never replace the target's.
+func TestServerURLContributesOnlyItsPath(t *testing.T) {
+	for _, tc := range []struct{ name, servers, target, want string }{
+		{"no servers", ``, "http://127.0.0.1:8888", "http://127.0.0.1:8888"},
+		{"relative path", `"servers":[{"url":"/api"}],`, "http://127.0.0.1:8000", "http://127.0.0.1:8000/api"},
+		{"absolute, other host", `"servers":[{"url":"http://localhost:8888"}],`, "http://127.0.0.1:8888", "http://127.0.0.1:8888"},
+		{"absolute with a path", `"servers":[{"url":"https://api.example.com/v1/"}],`, "http://127.0.0.1:3000", "http://127.0.0.1:3000/v1"},
+		{"absolute, same origin", `"servers":[{"url":"http://127.0.0.1:8000/api"}],`, "http://127.0.0.1:8000", "http://127.0.0.1:8000/api"},
+		{"target mount, absolute root", `"servers":[{"url":"http://localhost:3000"}],`, "http://127.0.0.1:3000/app", "http://127.0.0.1:3000/app"},
+		{"target mount, absolute path", `"servers":[{"url":"http://localhost:3000/v1"}],`, "http://127.0.0.1:3000/app", "http://127.0.0.1:3000/app/v1"},
+		{"target mount already in server", `"servers":[{"url":"http://localhost:3000/app/v1"}],`, "http://127.0.0.1:3000/app/", "http://127.0.0.1:3000/app/v1"},
+		{"target mount, relative path", `"servers":[{"url":"/v1"}],`, "http://127.0.0.1:3000/app", "http://127.0.0.1:3000/app/v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `{"openapi":"3.0.3","info":{"title":"t","version":"1"},` + tc.servers +
+				`"paths":{"/orders":{"get":{"security":[]}}}}`
+			res, err := Parse([]byte(doc), tc.target, model.Source{})
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if got := opByID(t, res, "GET /orders").BaseURL; got != tc.want {
+				t.Errorf("BaseURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	res, err := Parse([]byte(`{"openapi":"3.0.3","info":{"title":"t","version":"1"},
+	  "servers":[{"url":"http://localhost:8888"}],"paths":{"/a":{"get":{}}}}`), "http://127.0.0.1:8888", model.Source{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, "\n"), "keeping only its path") {
+		t.Errorf("a replaced server host was not reported: %v", res.Warnings)
+	}
+	// An explicit default port or a difference in case is the same origin.
+	for _, server := range []string{"http://127.0.0.1:80/x", "HTTP://127.0.0.1/x"} {
+		res, err := Parse([]byte(`{"openapi":"3.0.3","info":{"title":"t","version":"1"},
+		  "servers":[{"url":"`+server+`"}],"paths":{"/a":{"get":{}}}}`), "http://127.0.0.1", model.Source{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(strings.Join(res.Warnings, "\n"), "keeping only its path") {
+			t.Errorf("%s was reported as a different host: %v", server, res.Warnings)
+		}
+	}
+}

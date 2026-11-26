@@ -115,6 +115,13 @@ consumer can detect a change rather than misparse.
 
 ### Fixed
 
+- An OpenAPI document's absolute `servers` URL replaced the target's host, so a
+  specification written for `localhost` sent nothing to a target given as `127.0.0.1`:
+  every operation was refused by scope. The document now contributes only its path, on
+  the target the operator named, and a replaced host is reported as a warning.
+- A single-page application's index page at a well-known specification path stopped the
+  run as a malformed document, even with a browser recording supplied. An HTML page at a
+  probed path is now an absence; a document named with `--spec-url` is still parsed.
 - Findings against an expectation a framework adapter inferred could be confirmed,
   contrary to the documented rule; they now stay suspected.
 - Operations adopted from a framework adapter had no base URL, so every check against
