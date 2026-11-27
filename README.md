@@ -19,10 +19,10 @@ its own safety rules in code: scope, impact, request budgets and an audit log of
 request it sends.
 
 > [!IMPORTANT]
-> **Sulayi is early-stage (v0.x, unreleased).** Today it tests authentication and
-> object-level authorization, signing in as your test accounts, on applications with or
-> without an OpenAPI document. Injection and misconfiguration testing are planned, not
-> built. See [Status](#status).
+> **Sulayi is early-stage (v0.x, unreleased).** It tests authentication, object-level and
+> function-level authorization across your test accounts and roles, and injection and
+> misconfiguration in GET parameters, on applications with or without an OpenAPI
+> document. Request bodies are not tested yet. See [Status](#status).
 
 ---
 
@@ -139,20 +139,22 @@ compare against. [Add identities](#identities) and the same defect can be confir
 | Source analysis with your own opengrep/Semgrep rules | Experimental — Semgrep itself never executed |
 | Nuclei and ZAP integrations | Built, **currently blocked** (see [Safety](#safety)) |
 | Signing in through the app's own login: bearer token or cookie session (with CSRF), `--env` credentials files, roles, bounded re-authentication | Implemented — bearer logins are run against the Laravel Passport and NestJS JWT reference starters by the reference workflow; cookie sessions and CSRF are tested on local fixtures only |
-| Testing across accounts and roles from records Sulayi creates and deletes itself, against declared ownership and role rules | Implemented — validated on local fixtures; the reference-starter run is pending |
+| Testing across accounts and roles from records Sulayi creates and deletes itself, against declared ownership and role rules | Implemented — validated on both reference starters, and confirmed every planted cross-owner and cross-role defect it reached on crAPI and Juice Shop |
 | Testing applications without an OpenAPI document: framework adapters, browser recordings (HAR, discovery only) and a bounded same-origin crawler, with a declared access policy as the oracle | Implemented — the crawler reads server-rendered links only; a single-page app's API comes from a HAR |
 | Injection and misconfiguration checks: boolean SQL injection, reflected XSS, template injection, open redirect, credentialed CORS, stack-trace disclosure — GET query and path parameters only | Implemented — validated on paired local fixtures |
-| `sulayi report` and `sulayi verify <finding>`: re-running one finding from its recipe, with fresh sign-ins, as a new linked run | Implemented — validated on local fixtures |
+| `sulayi report` and `sulayi verify <finding>`: re-running one finding from its recipe, with fresh sign-ins, as a new linked run | Implemented — validated on local fixtures; reproduced crAPI findings from their recipes |
 
 ---
 
 ## Usage
 
 ```bash
-sulayi attack <url>   # assess an application
-sulayi init           # write a commented sulayi.yaml
-sulayi doctor         # what is installed, configured and blocked; changes nothing
-sulayi version        # version, Go toolchain and platform
+sulayi attack <url>        # assess an application
+sulayi report              # print a run's findings with their refs
+sulayi verify <finding>    # re-run one finding's check to see whether it is fixed
+sulayi init                # write a commented sulayi.yaml
+sulayi doctor              # what is installed, configured and blocked; changes nothing
+sulayi version             # version, Go toolchain and platform
 ```
 
 `sulayi attack` flags:
@@ -426,18 +428,23 @@ it did not test.
 Sulayi is pre-1.0 and has no published release. Output schemas may change.
 
 - **Evidence so far:** paired vulnerable and secure fixtures in the evaluation harness, two
-  reference applications assessed in a weekly CI workflow, and manually triggered
-  real-binary integration tests for the engines. Precision and recall on real applications have **not** been
-  measured, so no detection-quality claim is made.
+  reference applications assessed in a weekly CI workflow, and a measurement against
+  OWASP crAPI and OWASP Juice Shop at pinned versions, published as measured in
+  [docs/evaluation/mvp-measurement.md](docs/evaluation/mvp-measurement.md). It found no
+  false positive, but in 7 findings on two applications: too small a sample to claim a
+  general false-positive rate. Detection depends on the surface Sulayi is given — every
+  reachable planted defect was confirmed from crAPI's specification, while most of Juice
+  Shop's were out of reach of a browser recording.
 - **Platforms:** CI builds and tests on Linux, macOS and Windows.
-- **Next:** authorization testing across roles and accounts, then injection and
-  misconfiguration checks, each with runtime verification. Optional AI assistance comes
-  later and will never be required.
+- **Next:** the MVP phases are complete; what follows is in the roadmap's "Later", planned
+  from the measurement's results. Optional AI assistance will never be required.
 
-Known limits today: BOLA testing needs you to name one record per owner; there is no
-tenancy or function-level authorization testing yet; OAuth authorization flows, OIDC, MFA
-and browser login are not supported; and an application whose `GET` endpoints change
-state is protected only as far as you list them.
+Known limits today: injection is tested in GET query and path parameters only, never in
+request bodies; cross-role comparison uses GET only; there is no tenancy testing, SSRF,
+mass-assignment or client-side (DOM) testing; a single-page app's API is found only from a
+browser recording; OAuth authorization flows, OIDC, MFA and browser login are not
+supported; and an application whose `GET` endpoints change state is protected only as far
+as you list them.
 
 ---
 
