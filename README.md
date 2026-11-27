@@ -19,7 +19,7 @@ its own safety rules in code: scope, impact, request budgets and an audit log of
 request it sends.
 
 > [!IMPORTANT]
-> **Sulayi is early-stage (v0.x, unreleased).** It tests authentication, object-level and
+> **Sulayi is early-stage (v0.x, pre-1.0).** It tests authentication, object-level and
 > function-level authorization across your test accounts and roles, and injection and
 > misconfiguration in GET parameters, on applications with or without an OpenAPI
 > document. Request bodies are not tested yet. See [Status](#status).
@@ -425,7 +425,7 @@ it did not test.
 
 ## Status
 
-Sulayi is pre-1.0 and has no published release. Output schemas may change.
+Sulayi is pre-1.0; the first release is [v0.1.0](docs/releases/v0.1.0.md). Output schemas may change.
 
 - **Evidence so far:** paired vulnerable and secure fixtures in the evaluation harness, two
   reference applications assessed in a weekly CI workflow, and a measurement against

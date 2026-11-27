@@ -8,6 +8,15 @@ consumer can detect a change rather than misparse.
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-11-27
+
+First public release. There is no earlier published version, so this section is the whole
+history rather than a delta: first the work since the project became Sulayi, then the
+AppSec Framework milestones it grew from. Release notes written for users rather than
+contributors are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.md), and the
+measurement on real applications in
+[docs/evaluation/mvp-measurement.md](docs/evaluation/mvp-measurement.md).
+
 ### Changed
 
 - **Renamed to Sulayi** ([ADR-0018](docs/adr/0018-product-identity-sulayi.md)). The module is
@@ -34,6 +43,10 @@ consumer can detect a change rather than misparse.
 - Interrupted, timed-out and budget-exhausted runs exit 4 (aborted).
 
 ### Added
+
+- **MVP measurement** ([ADR-0025](docs/adr/0025-mvp-measurement-method.md)): a manual
+  workflow that runs Sulayi three times each against OWASP Juice Shop and OWASP crAPI at
+  pinned digests and scores the runs against ground truth written from their source.
 
 - **`sulayi verify <finding>` and `sulayi report`**
   ([ADR-0024](docs/adr/0024-verify-a-finding-from-its-recipe.md)). Every finding Sulayi
@@ -115,6 +128,9 @@ consumer can detect a change rather than misparse.
 
 ### Fixed
 
+- Cross-role work was not counted as executed, so a run whose only executed work was
+  cross-role probes reported its confirmed findings under "this assessment executed no
+  checks" and exited 3.
 - An OpenAPI document's absolute `servers` URL replaced the target's host, so a
   specification written for `localhost` sent nothing to a target given as `127.0.0.1`:
   every operation was refused by scope. The document now contributes only its path, on
@@ -142,14 +158,7 @@ consumer can detect a change rather than misparse.
   unpaced.
 - `doctor` reports where a blocked engine is installed, without executing it.
 
-## [0.1.0] — unreleased
-
-First public release. Everything below is in it: there is no earlier published version, so
-this section is the whole history rather than a delta. Release notes written for users
-rather than contributors are in
-[docs/releases/v0.1.0.md](docs/releases/v0.1.0.md).
-
-### Added
+### Added — foundation (AppSec Framework)
 
 - Initial project foundation: research, threat model, architecture and ten ADRs.
 - `appsec` CLI with `scan`, `init` and `doctor`, and a documented exit-code contract that
@@ -625,8 +634,5 @@ rather than the design.
 
 ### Known limitations
 
-- No BOLA/IDOR, tenancy or multi-identity testing.
-- No external engine integrations, and no framework adapters.
-- Attack surface comes only from a specification, so undocumented routes are invisible.
-- Without configured credentials there is no authenticated control request, so no finding
-  can reach `confirmed`.
+The limits of this release are stated once, in
+[docs/releases/v0.1.0.md](docs/releases/v0.1.0.md#current-limitations).
