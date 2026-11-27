@@ -322,6 +322,11 @@ func (r Result) BlockedCount() int {
 func IsAssessmentWork(dimension string) bool {
 	return dimension == DimensionOperation ||
 		dimension == DimensionOwnership ||
+		// Cross-role work is assessment for the same reason cross-owner work
+		// is: a route was probed as a role the declared rule does not allow.
+		// Leaving it out reported two confirmed cross-role findings on Juice
+		// Shop under "this assessment executed no checks".
+		dimension == DimensionRole ||
 		// A discovered path is surface that exists and was not assessed, which
 		// is precisely what the untested counter means. Excluding it would
 		// leave the headline number measuring only the surface the application

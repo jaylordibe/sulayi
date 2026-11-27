@@ -23,6 +23,10 @@ func TestCountersIgnoreTheIdentityDimension(t *testing.T) {
 		// probed a boundary has not "executed no checks".
 		{Dimension: DimensionOwnership, Disposition: model.DispositionExecuted},
 		{Dimension: DimensionOwnership, Disposition: model.DispositionBlocked},
+		// Cross-role work is assessment as well: a route probed as a role the
+		// declared rule does not allow.
+		{Dimension: DimensionRole, Disposition: model.DispositionExecuted},
+		{Dimension: DimensionRole, Disposition: model.DispositionBlocked},
 		// External engine work is assessment too: an engine that failed is
 		// blocked work against the target, and a summary that omits it reads
 		// as cleaner than the run was.
@@ -32,11 +36,11 @@ func TestCountersIgnoreTheIdentityDimension(t *testing.T) {
 		{Dimension: DimensionIdentity, Disposition: model.DispositionExecuted},
 		{Dimension: DimensionIdentity, Disposition: model.DispositionBlocked},
 	}}
-	if got := res.ExecutedCount(); got != 3 {
-		t.Errorf("ExecutedCount = %d, want 3", got)
+	if got := res.ExecutedCount(); got != 4 {
+		t.Errorf("ExecutedCount = %d, want 4", got)
 	}
-	if got := res.BlockedCount(); got != 3 {
-		t.Errorf("BlockedCount = %d, want 3", got)
+	if got := res.BlockedCount(); got != 4 {
+		t.Errorf("BlockedCount = %d, want 4", got)
 	}
 }
 
@@ -49,6 +53,19 @@ func TestARunWithOwnershipFindingsIsNotReportedAsHavingExecutedNothing(t *testin
 	}}
 	if res.ExecutedCount() == 0 {
 		t.Fatal("a run that probed an ownership boundary reported executing no checks")
+	}
+}
+
+// The same contradiction for cross-role work: Juice Shop's only executed work
+// was two cross-role probes, both confirmed, and the run said it executed
+// nothing and exited as if it had.
+func TestARunWithOnlyCrossRoleWorkIsNotReportedAsHavingExecutedNothing(t *testing.T) {
+	res := Result{Coverage: []model.CoverageEntry{
+		{Dimension: DimensionRole, Subject: "GET /a", IdentityID: "jim",
+			Disposition: model.DispositionExecuted},
+	}}
+	if res.ExecutedCount() == 0 {
+		t.Fatal("a run that probed a role boundary reported executing no checks")
 	}
 }
 
