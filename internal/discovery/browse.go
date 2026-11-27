@@ -355,8 +355,8 @@ func (r *Recorder) addForm(method, p string) {
 }
 
 // finish turns the recorder's observations into the result's operations,
-// leaving out page loads that were the application's fallback and the probe
-// that established it.
+// leaving out page loads that were the application's fallback, and the probe
+// that established it with everything requested under its path.
 func (res BrowseResult) finish(r *Recorder, fallback *fingerprint, probe string, settle func()) BrowseResult {
 	if settle != nil {
 		settle()
@@ -370,14 +370,19 @@ func (res BrowseResult) finish(r *Recorder, fallback *fingerprint, probe string,
 		res.Limitations = append(res.Limitations, fmt.Sprintf("browsing as %s could not load %d of %d page(s)",
 			res.Actor, res.Failed, res.Pages))
 	}
-	probeID := ""
+	// The probe's path is one Sulayi made up. A page loaded there may request
+	// paths relative to it — a chat client polling <probe>/socket.io/ — and
+	// none of them is a route of the application, nor the same from one run to
+	// the next.
+	probePath := ""
 	if ob, v := r.obs.observe("GET", probe); v == observedKept {
-		probeID = model.OperationID(ob.method, ob.path)
+		probePath = ob.path
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, id := range r.order {
-		if id == probeID {
+		op := r.ops[id]
+		if probePath != "" && (op.PathTemplate == probePath || strings.HasPrefix(op.PathTemplate, probePath+"/")) {
 			continue
 		}
 		if !r.data[id] {

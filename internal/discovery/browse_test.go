@@ -20,6 +20,9 @@ type fakeSite struct {
 	visited  []string
 	stopAt   int
 	visitErr map[string]error
+	// relative, when set, is what every page requests relative to its own
+	// URL, as a chat client does.
+	relative []string
 }
 
 type fakePage struct {
@@ -44,6 +47,10 @@ func (s *fakeSite) visit(_ context.Context, rawURL string) ([]string, []Rendered
 		ContentType: "text/html", Body: []byte(p.body)})
 	for _, r := range p.requests {
 		s.rec.Record(r)
+	}
+	for _, rel := range s.relative {
+		u := strings.TrimSuffix(strings.SplitN(rawURL, "#", 2)[0], "/") + "/" + rel
+		s.rec.Record(Exchange{Method: "GET", URL: u, ResourceType: "XHR", Status: 200})
 	}
 	if err := s.visitErr[key]; err != nil {
 		return nil, nil, false, err
@@ -242,5 +249,29 @@ func TestBrowseThatLoadedNothingSaysSo(t *testing.T) {
 	}
 	if !settled {
 		t.Error("Settle was not called before the result was built")
+	}
+}
+
+// A page loaded at the made-up probe path may request paths relative to it.
+// None of them is a route, and none may make one run differ from the next.
+func TestNothingUnderTheProbePathBecomesARoute(t *testing.T) {
+	const o = "http://app.test"
+	var runs [][]string
+	for i := 0; i < 2; i++ {
+		s := newFakeSite(t, o, "anonymous")
+		s.relative = []string{"socket.io/?EIO=4&transport=polling"}
+		s.pages["/"] = fakePage{status: 200, body: "<app-root></app-root>"}
+		res := Browse(context.Background(), BrowseOptions{Target: o, Actor: "anonymous", Visit: s.visit, Recorder: s.rec})
+		var ids []string
+		for _, op := range res.Operations {
+			if strings.Contains(op.PathTemplate, "sulayi-browse-") {
+				t.Errorf("an operation under the probe path: %s", op.ID)
+			}
+			ids = append(ids, op.ID)
+		}
+		runs = append(runs, ids)
+	}
+	if strings.Join(runs[0], ",") != strings.Join(runs[1], ",") {
+		t.Errorf("two runs differ: %v / %v", runs[0], runs[1])
 	}
 }

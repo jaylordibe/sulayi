@@ -166,3 +166,71 @@ Juice Shop was scored against `evals/mvp/juice-shop.expected.yaml` with SHA-256
 against `evals/mvp/crapi.expected.yaml` with SHA-256
 `36513d88fef6e5159a91895e5de84d83142aec7a8c0366b06805046dff4ba1c3`. The
 measurements, reports and request logs are the runs' artifacts.
+
+## Entry 3 — 2026-11-27, commit `ed0c858`
+
+Run: [MVP measurement 45997366779](https://github.com/jaylordibe/sulayi/actions/runs/45997366779).
+Same pinned versions, digests and ground truth as entries 1 and 2. One input
+changed, and it is the capability under test: Juice Shop's configuration
+enables the headless browser
+([ADR-0026](../adr/0026-headless-browser-with-no-network-of-its-own.md)), beside
+the same recording. crAPI's configuration is unchanged. The reference starters
+were not re-run: nothing they exercise changed, and the browser is not enabled
+for them.
+
+### Summary
+
+**No false positive on either target, and no request left scope. Juice Shop was
+not reproducible across its runs — a defect in the browser, found by this
+entry and described below.** Detection is unchanged at 5 of 10 assessed
+entries; on Juice Shop the browser brought three entries that entry 2 could not
+reach into the assessment, and the checks found nothing in them.
+
+| Target | Findings | Detection | Coverage | Reproducible | Time per run | Outside scope |
+|---|---|---|---|---|---|---|
+| Juice Shop | 2, both true | 1 of 6 | 45 of 232 (see below) | **no** — runs differ | 37s | 0 |
+| crAPI | 5, all true | 4 of 4 | 65 of 316 | yes, 3 runs | 32s | 0 |
+
+False positives: 0 of 7 findings, none unlisted awaiting triage.
+
+### Juice Shop: three more entries reached, none confirmed
+
+| Expected | Entry 2 | Entry 3 | Detail |
+|---|---|---|---|
+| js-bfla-authentication-details | confirmed | confirmed | as both customer accounts |
+| js-sqli-product-search | unreached | missed | the browser observed `q`; the boolean check ran on it and found nothing |
+| js-stack-trace | unreached | missed | executed on `GET /api/Challenges/`; nothing disclosed |
+| js-open-redirect | unreached | missed | the browser followed the rendered `/redirect?to=…` link; the check ran on `to` and found nothing |
+| js-bfla-users | unreached | unreached | `/api/Users` is requested only by the administration screen, which the front end does not show: it decides it is signed out because its token lives in browser storage |
+| js-bola-basket | unreached | unreached | in the surface, with no ownership rule declared for it |
+
+The three misses are what the ground truth anticipated when it was written:
+product search places the input inside `LIKE '%…%'`, where a quoted boolean
+condition is closed by the application's own `%`, and the redirect allowlist
+is bypassed only by embedding an allowlisted URL, which the open-redirect check
+does not attempt. Both are limits of the checks, not of the surface.
+
+Each actor browsed 7 pages and failed to load 1: the rendered GitHub link
+behind `/redirect`, which scope refused, as it should.
+
+### The defect: the fallback probe's own requests became operations
+
+Before browsing, the browser loads a path that cannot exist
+(`/sulayi-browse-<random>`) to learn the application's fallback page. Juice
+Shop's page, loaded there, starts its chat client, which polls
+`/sulayi-browse-<random>/socket.io/`. Those requests were kept as operations:
+one per actor, with a random path, so every run's ledger differed in 28 rows (4
+operations × 7 checks), and 20 of the 45 executed rows above were checks run
+against paths Sulayi made up. Nothing else in the ledgers differed.
+
+Nothing under the probe's path is a route of the application. Fixed after this
+entry: everything requested under it is left out
+(`discovery.TestNothingUnderTheProbePathBecomesARoute`). The next entry
+measures the fix.
+
+### Provenance
+
+Scored against the same expected files as entry 2 (Juice Shop SHA-256
+`b13d83399905aa063343618962aae91ac13e9e37e06e9f8474e4ed3e5ea4a009`, crAPI
+`36513d88fef6e5159a91895e5de84d83142aec7a8c0366b06805046dff4ba1c3`). The
+measurements, reports and request logs are the run's artifacts.
