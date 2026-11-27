@@ -180,10 +180,8 @@ func Launch(ctx context.Context, exe string) (*Browser, error) {
 	b.kill = kill
 	cmd := exec.CommandContext(procCtx, exe, args...)
 	cmd.Dir = profile
-	// The browser inherits nothing but what it needs to start; its home is its
-	// throwaway profile, so it reads and writes nothing of the operator's.
-	cmd.Env = append(proc.MinimalEnv([]string{"SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR",
-		"LOCALAPPDATA", "PROGRAMDATA"}, nil), "HOME="+profile, "USERPROFILE="+profile)
+	// The browser inherits nothing but what it needs to start (see browserEnv).
+	cmd.Env = browserEnv(profile)
 	proc.Isolate(cmd)
 	// The browser's diagnostics are kept, bounded, for the one case they are
 	// needed: a browser that will not start says why.

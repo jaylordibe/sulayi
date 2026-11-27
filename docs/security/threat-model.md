@@ -1492,7 +1492,9 @@ operator's machine. See [ADR-0026](../adr/0026-headless-browser-with-no-network-
   the existing `httpx` tests, which `identity.Control.Relay` goes through).
 - **No debugging port.** The protocol runs over inherited pipes; nothing else on
   the machine can drive the browser. The browser inherits a minimal environment
-  whose home is its throwaway profile.
+  with no credential in it; on macOS and Linux its home is its throwaway
+  profile, and on Windows it keeps the user's folder variables, without which
+  Chrome refuses to be driven at all, while its profile is the throwaway one.
 - **Chrome's sandbox stays on.** There is no `--no-sandbox` path.
 - **Hostile protocol traffic is bounded.** A message larger than 32 MiB or
   malformed ends the connection; a relayed response over 16 MiB is refused;
