@@ -1,6 +1,7 @@
 # ADR-0021: An application without a specification is assessed from what can be observed, against a declared policy
 
-- **Status:** Accepted
+- **Status:** Accepted; superseded in part by [ADR-0026](0026-headless-browser-with-no-network-of-its-own.md)
+  (the rejection of a headless browser, and dropping a recording's query strings entirely)
 - **Date:** 2026-11-19
 - **Supersedes in part:** [ADR-0016](0016-discovered-surface-is-not-an-operation.md) (its rule that discovery never fetches what it finds, for the crawler only)
 - **Relates to:** [ADR-0019](0019-safety-enforced-at-the-http-client.md), [ADR-0020](0020-login-identities-and-credentials-files.md)

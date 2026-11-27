@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jaylordibe/sulayi/internal/browser"
 	"github.com/jaylordibe/sulayi/internal/config"
 	"github.com/jaylordibe/sulayi/internal/identity"
 	"github.com/jaylordibe/sulayi/internal/scanner"
@@ -49,6 +50,8 @@ func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
 				fmt.Fprintf(stdout, "  %-22s %s\n", "file permissions", "NOT enforced on this platform")
 			}
 
+			reportBrowser(stdout, configPath)
+
 			reportIdentities(stdout, configPath, envFile)
 
 			reportEngines(cmd.Context(), stdout, configPath)
@@ -75,6 +78,23 @@ func newDoctorCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to sulayi.yaml (default: ./sulayi.yaml if present)")
 	cmd.Flags().StringVar(&envFile, "env", "", "credentials file to check, as sulayi attack --env reads it")
 	return cmd
+}
+
+// reportBrowser says which browser discovery.browser would run, and whether it
+// is enabled. It starts nothing.
+func reportBrowser(stdout io.Writer, configPath string) {
+	fmt.Fprintln(stdout, "\nBrowser (single-page applications; optional)")
+	cfg, err := loadConfigIfPresent(configPath)
+	enabled := "not enabled (discovery.browser.enabled)"
+	if err == nil && cfg.Discovery.Browser.Enabled {
+		enabled = "enabled"
+	}
+	exe, ferr := browser.Find(cfg.Discovery.Browser.Executable)
+	if ferr != nil {
+		fmt.Fprintf(stdout, "  %-22s %s; %v\n", "browser", enabled, ferr)
+		return
+	}
+	fmt.Fprintf(stdout, "  %-22s %s; would run %s\n", "browser", enabled, exe)
 }
 
 // reportIdentities says whether each configured identity's credential can be

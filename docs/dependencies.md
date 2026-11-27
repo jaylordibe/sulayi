@@ -29,6 +29,7 @@ hashing, HTTP and the run store.
 | A SARIF library | We emit a small fixed subtree, validated against the real schema in tests. |
 | **modernc.org/sqlite** | Correct eventual choice, but a very large transpiled dependency for a workload that is currently "write once, read once". See ADR-0007. |
 | **playwright-go** | v0.x, single maintainer, and ~650 MB of browsers plus Node plus root-level system dependencies for every user. See the ecosystem research. |
+| **chromedp**, **rod** | The headless browser needs about six DevTools protocol methods over `--remote-debugging-pipe`, which the standard library speaks in a few hundred lines. Both libraries connect through a debugging port over a WebSocket, chromedp brings a generated protocol tree, and rod downloads a browser by default. See ADR-0026. |
 | Nuclei's Go SDK | 457 require lines, documented global state, and its own README warns about running it as a service. We subprocess it instead. See ADR-0005. |
 | Unlicensed Burp extensions | Autorize and Authz carry no licence at all. Never vendor them. |
 | Semgrep registry rules | Licensed for the user's own internal business purposes only; distribution and service use are forbidden. Never shipped, vendored, auto-fetched or referenced in examples. |

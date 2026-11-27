@@ -50,8 +50,16 @@ jobs:
       # that would mean making every pull request depend on downloading Nuclei,
       # a JVM and a Python package. Run them with `-v` after installing an
       # engine, or through the engine-integration job below.
+      # The browser tests run against the Chrome each hosted runner image
+      # already has; nothing is downloaded. SULAYI_REQUIRE_BROWSER turns a
+      # missing browser into a failure, so the tests that show the browser has
+      # no network of its own can never pass by skipping.
       - run: go test ./...
+        env:
+          SULAYI_REQUIRE_BROWSER: "1"
       - run: go test -race ./...
+        env:
+          SULAYI_REQUIRE_BROWSER: "1"
 
   engine-integration:
     # Opt-in, manual, and never a gate on a pull request. It installs Nuclei so

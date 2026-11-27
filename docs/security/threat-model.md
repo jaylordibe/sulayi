@@ -1456,6 +1456,68 @@ quotable thing the tool says. See [ADR-0024](../adr/0024-verify-a-finding-from-i
   **TESTED** (`store.TestRunsAreNewestFirstWithinOneSecond`,
   `cli.TestS5_ReportPrintsRefsAndVerifyRefusesAnUnknownOne`).
 
+### T-28 The headless browser runs the target's code
+
+With `discovery.browser.enabled`, Sulayi starts a local Chrome or Chromium and
+loads the target's pages in it, so the target's JavaScript runs on the
+operator's machine. See [ADR-0026](../adr/0026-headless-browser-with-no-network-of-its-own.md).
+
+- **The page has no network of its own.** Every request it makes is paused and
+  sent, or refused, by `httpx.Client.Relay`, under the same scope, origin
+  binding, guard, budget and request log as everything else. What interception
+  does not cover fails closed: nothing resolves, every connection goes to a
+  proxy that is itself unreachable (and is a Sulayi listener refusing all), QUIC
+  is off and WebRTC may not use UDP. **TESTED**
+  (`browser.TestThePageHasNoNetworkOutsideTheRelay`: off-origin requests by IP
+  and by name, `localhost`, fetch, image, script, WebSocket, EventSource,
+  beacon, iframe, pop-up, service worker, WebRTC, a same-origin redirect and a
+  top-level navigation, all pointed at a canary that must receive nothing; the
+  redirect's next hop is shown to pass through the relay; a manual control run
+  without the flags showed the canary reached).
+- **A page cannot sign its identity out.** A page's own request to a route
+  browsing never loads — sign-out and authentication routes, a GET listed as
+  state-changing, an excluded operation — is refused before it is sent, and a
+  client-side route such as `#/logout` is judged as that path. **TESTED**
+  (`cli.TestAPageCannotSignItsIdentityOut`,
+  `discovery.TestBrowseNeverLoadsASkippedClientSideRoute`).
+- **The browser never changes the target.** `Relay` refuses every
+  state-changing request in every profile, `aggressive` included, and logs the
+  refusal. **TESTED** (`httpx.TestRelayRefusesStateChangingRequestsInEveryProfile`,
+  `cli.TestBrowserFindsASinglePageApplicationsAPIAndNeverWrites`, which runs
+  under `aggressive` and asserts the target received no POST).
+- **A page cannot choose or carry a credential.** Only `Accept`,
+  `Accept-Language` and `X-Requested-With` are forwarded from the page; the
+  actor's credential is added by Sulayi and bound to the target's origin.
+  **TESTED** (`cli.TestAPageCannotForwardItsOwnCredentials`; origin binding by
+  the existing `httpx` tests, which `identity.Control.Relay` goes through).
+- **No debugging port.** The protocol runs over inherited pipes; nothing else on
+  the machine can drive the browser. The browser inherits a minimal environment
+  whose home is its throwaway profile.
+- **Chrome's sandbox stays on.** There is no `--no-sandbox` path.
+- **Hostile protocol traffic is bounded.** A message larger than 32 MiB or
+  malformed ends the connection; a relayed response over 16 MiB is refused;
+  links and forms read from a page are capped. **TESTED**
+  (`browser.TestAnOversizedMessageEndsTheConnection`,
+  `browser.TestAMalformedMessageEndsTheConnection`,
+  `httpx.TestRelayRefusesAResponseOverItsLimit`).
+- **Nothing outlives the run.** The process group is killed when browsing ends
+  or the run is cancelled — without waiting on a browser that has stopped
+  reading its pipe — and the profile, which holds whatever the target stored in
+  the browser, is deleted, or reported with its path if it cannot be.
+  **TESTED** (`browser.TestCloseLeavesNoProcessOrProfile`,
+  `browser.TestCancellingAVisitStopsIt`,
+  `browser.TestCloseKillsABrowserThatStoppedReading`; the CLI test checks no
+  profile is left).
+- **No query value is kept.** Only parameter names are, and a bare key — which
+  is a value — is dropped. **TESTED** (`discovery.TestObservedQueryNamesKeepNoValues`).
+- **Supply chain.** No module was added and no browser is downloaded; the
+  operator's own installation runs.
+
+Residual: the browser is a large, complex program processing hostile input;
+Sulayi relies on Chrome's sandbox for what a renderer exploit could do locally.
+On Windows a grandchild process outliving the browser is the same platform
+limitation recorded for adapters.
+
 ## 3. Residual risk accepted at this stage
 
 Stated plainly rather than left for a reader to discover.
@@ -1466,6 +1528,9 @@ Stated plainly rather than left for a reader to discover.
   documentation says so.
 - **File permissions are not enforced on Windows.** `os.Chmod` only toggles a read-only
   attribute there. The CLI warns; it does not refuse. An explicit ACL is planned.
+- **The headless browser executes the target's JavaScript** inside Chrome's own sandbox.
+  Its network is Sulayi's (T-28), but a renderer exploit chained with a sandbox escape
+  would run on the operator's machine. It is off unless enabled for that reason.
 - **No sandboxing of external engines** beyond process isolation. Today the mitigation is
   that no engine integration exists at all.
 - **`INDETERMINATE` outcomes are reported but not automatically re-tried.**

@@ -309,6 +309,25 @@ func (c *Control) DoWithBody(
 	})
 }
 
+// Relay sends a request a browser page made, as this identity: the identity's
+// credential replaces any the page tried to send, and the request is bound to
+// the identity's origin like every other it makes.
+func (c *Control) Relay(ctx context.Context, method, url string, extra map[string][]string) (httpx.RelayResponse, error) {
+	header := make(map[string][]string, len(extra)+2)
+	for k, v := range extra {
+		cp := make([]string, len(v))
+		copy(cp, v)
+		header[k] = cp
+	}
+	for k, v := range c.Headers() {
+		header[k] = v
+	}
+	return c.client.Relay(ctx, httpx.Request{
+		Method: method, URL: url, Header: header,
+		Identity: c.ID(), BoundOrigin: c.baseURL,
+	})
+}
+
 // NoteSuspicious reports that an authenticated request produced a result
 // consistent with an invalid credential, and triggers a canary probe.
 //

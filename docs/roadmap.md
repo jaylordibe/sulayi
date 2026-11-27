@@ -24,6 +24,8 @@ produces reproducible reports.
 | **S5** | `sulayi report` and `sulayi verify <finding>`: re-running a finding from its recipe, with fresh sessions, as a new run linked to the original ([ADR-0024](adr/0024-verify-a-finding-from-its-recipe.md)) | Done — a fixed defect verifies as fixed and an unfixed one reproduces, across the authentication, cross-owner, cross-role and XSS checks; verify runs with the earlier run's evidence and request log unreadable |
 | **MVP measurement** | Run against Juice Shop, crAPI and both reference starters; measure false positives first, then confirmed detections, coverage, reproducibility (identical coverage across three runs), time, and requests outside scope (must be zero) | Done — method in [ADR-0025](adr/0025-mvp-measurement-method.md); [entry 2](evaluation/mvp-measurement.md#entry-2--2026-11-27-commit-117d79d): 0 false positives in 7 findings, crAPI 4 of 4 and Juice Shop 1 of 6 detected, identical across three runs, no request outside scope |
 
+| **B1** | A headless browser for single-page applications: a locally installed Chrome or Chromium with no network of its own — every request a page makes is sent or refused by Sulayi's client, and a state-changing one is recorded, never sent; observed query parameter names kept from the browser and from recordings ([ADR-0026](adr/0026-headless-browser-with-no-network-of-its-own.md)) | Implemented — negative tests against a real Chrome on every CI platform; measurement entry 3 pending |
+
 ### Acceptance criteria for the phases still ahead
 
 - **S3** — On the reference starters, cross-account tests run with no hand-written
@@ -36,12 +38,16 @@ produces reproducible reports.
   nothing from the earlier run but the finding's recipe.
 - **MVP measurement** — Results are published as measured, including the false-positive
   rate, before anything in "Later" is planned.
+- **B1** — No connection leaves the browser except through Sulayi's client, shown against a
+  canary for every route interception does not cover; the browser sends no state-changing
+  request in any profile; nothing — process or profile — outlives the run; and a new dated
+  measurement entry on Juice Shop with the browser enabled, its ground truth unchanged,
+  reports no false positive.
 
 ## Later
 
 Deliberately unplanned until the MVP measurement shows the core is reliable on real
-applications: a headless browser for single-page applications; optional, provider-neutral
-AI assistance that proposes hypotheses for the deterministic engine to confirm or reject;
+applications: optional, provider-neutral AI assistance that proposes hypotheses for the deterministic engine to confirm or reject;
 CI integration and comparison between runs; a verified outbound-destination control that
 would let Nuclei and ZAP run again; a dashboard.
 

@@ -247,6 +247,10 @@ func (g *Guard) StateChanging(method, rawURL string) bool {
 	if !model.IsSafeMethod(method) {
 		return true
 	}
+	if g == nil {
+		// No guard means no operator rules: only the method decides.
+		return false
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		// A URL that cannot be parsed cannot be shown not to match a rule.

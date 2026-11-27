@@ -120,6 +120,12 @@ type Surface struct {
 	Crawls []discovery.CrawlResult
 	// CrawlAdded counts operations the crawler added to the surface.
 	CrawlAdded int
+	// Browsing is what Sulayi's browser found as each actor.
+	Browsing []discovery.BrowseResult
+	// BrowserAdded counts operations the browser added to the surface.
+	BrowserAdded int
+	// BrowserProblem explains a browser that was enabled and could not run.
+	BrowserProblem string
 	// NavigationInferred counts routes given an inferred expectation because
 	// they were reached by link only while signed in.
 	NavigationInferred int

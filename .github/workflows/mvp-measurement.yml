@@ -50,6 +50,10 @@ jobs:
         # source (data/static/users.yml); they are a demo application's.
         run: |
           go build -o sulayi ./cmd/sulayi
+          # The configuration enables the headless browser, which uses the
+          # runner image's Chrome. Shown first, so a missing browser fails here
+          # rather than inside the runs below, whose exit status is not a gate.
+          ./sulayi doctor -c evals/mvp/juice-shop.sulayi.yaml | grep -A1 '^Browser' | grep -q 'enabled; would run'
           cat > "$RUNNER_TEMP/juice.env" <<'ENV'
           JUICE_ADMIN_EMAIL=admin@juice-sh.op
           JUICE_ADMIN_PASSWORD=admin123

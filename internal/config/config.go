@@ -457,6 +457,29 @@ type Discovery struct {
 	// Crawl is the bounded, same-origin, GET-only crawler that finds routes
 	// without a specification.
 	Crawl CrawlDiscovery `yaml:"crawl"`
+	// Browser is Sulayi's headless browser, which finds a single-page
+	// application's API from what its front end requests.
+	Browser BrowserDiscovery `yaml:"browser"`
+}
+
+// BrowserDiscovery configures the headless browser. It is off unless enabled:
+// it starts a local browser that runs the target's code, which an operator
+// should choose rather than discover. It runs as the anonymous caller and as
+// each signed-in identity, and every request a page makes is sent, or refused,
+// by Sulayi's own client.
+type BrowserDiscovery struct {
+	Enabled bool `yaml:"enabled"`
+	// Executable is the Chrome or Chromium to run. Empty means the first
+	// standard installation found. Sulayi never downloads a browser.
+	Executable string `yaml:"executable"`
+	// MaxPages bounds the pages loaded per identity. Default 20.
+	MaxPages int `yaml:"maxPages"`
+	// MaxDepth bounds how many links from the root are followed. Default 3.
+	MaxDepth int `yaml:"maxDepth"`
+	// MaxRequests bounds the requests the browser's pages may make in all,
+	// divided evenly among the identities it runs as. Default 300. They also
+	// count against assessment.maxRequests.
+	MaxRequests int `yaml:"maxRequests"`
 }
 
 // CrawlDiscovery configures the crawler. It runs as the anonymous caller and
@@ -705,6 +728,15 @@ func (c *Config) Validate() error {
 	}
 	if d := c.Discovery.Crawl.MaxDepth; d != 0 && (d < 1 || d > 10) {
 		problems = append(problems, "discovery.crawl.maxDepth must be between 1 and 10")
+	}
+	if p := c.Discovery.Browser.MaxPages; p != 0 && (p < 1 || p > 200) {
+		problems = append(problems, "discovery.browser.maxPages must be between 1 and 200")
+	}
+	if d := c.Discovery.Browser.MaxDepth; d != 0 && (d < 1 || d > 10) {
+		problems = append(problems, "discovery.browser.maxDepth must be between 1 and 10")
+	}
+	if n := c.Discovery.Browser.MaxRequests; n != 0 && (n < 1 || n > 5000) {
+		problems = append(problems, "discovery.browser.maxRequests must be between 1 and 5000")
 	}
 	for i, id := range c.Assessment.StateChangingOperations {
 		method, path, ok := strings.Cut(strings.TrimSpace(id), " ")
@@ -1209,6 +1241,22 @@ func (c Config) CrawlLimits() (pages, depth int) {
 		depth = discovery.DefaultCrawlDepth
 	}
 	return pages, depth
+}
+
+// BrowserLimits returns the browser's page, depth and request limits.
+func (c Config) BrowserLimits() (pages, depth, requests int) {
+	b := c.Discovery.Browser
+	pages, depth, requests = b.MaxPages, b.MaxDepth, b.MaxRequests
+	if pages == 0 {
+		pages = discovery.DefaultBrowserPages
+	}
+	if depth == 0 {
+		depth = discovery.DefaultBrowserDepth
+	}
+	if requests == 0 {
+		requests = discovery.DefaultBrowserMaxRequests
+	}
+	return pages, depth, requests
 }
 
 // AccessPolicy compiles the declared access policy. Validate has already

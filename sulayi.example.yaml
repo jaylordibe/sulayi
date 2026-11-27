@@ -288,6 +288,21 @@ discovery:
     # maxPages: 50     # per identity
     # maxDepth: 3      # links followed from the root
 
+  # The headless browser, for single-page applications. Off unless enabled.
+  # It runs your installed Chrome or Chromium (Sulayi never downloads one),
+  # loads your pages as the anonymous caller and as each identity, follows the
+  # links that render — client-side routes included — and records what the
+  # front end requests. It has no network of its own: every request a page
+  # makes is sent or refused by Sulayi's client, and one that would change
+  # state is recorded and never sent, in every profile. It never clicks,
+  # types or submits.
+  browser:
+    enabled: false
+    # executable: /path/to/chrome   # default: the first standard installation
+    # maxPages: 20       # per identity
+    # maxDepth: 3        # links followed from the root
+    # maxRequests: 300   # in all, divided among the identities
+
   # Surface the specification does not describe.
   #
   # Sulayi reads four things the application publishes about itself:

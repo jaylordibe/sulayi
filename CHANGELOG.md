@@ -8,6 +8,23 @@ consumer can detect a change rather than misparse.
 
 ## [Unreleased]
 
+### Added
+
+- **A headless browser for single-page applications** ([ADR-0026](docs/adr/0026-headless-browser-with-no-network-of-its-own.md)),
+  off unless `discovery.browser.enabled: true`. Sulayi loads the target's pages in a locally
+  installed Chrome or Chromium as the anonymous caller and as each identity, follows rendered
+  links including client-side routes, and adds what the front end requests to the surface. The
+  browser has no network of its own: every request a page makes is sent or refused by
+  Sulayi's client, a state-changing one is recorded and never sent in any profile, and
+  everything else fails closed. The protocol runs over a pipe, with no port and no new
+  dependency; Sulayi never downloads a browser. `sulayi doctor` reports which one it would run.
+
+### Changed
+
+- **Observed query parameter names are kept.** A browser recording (`--har`) now contributes
+  the names of each request's query parameters, never their values, so the injection checks
+  have something to inject into; previously query strings were dropped entirely.
+
 ## [0.1.0] — 2026-11-27
 
 First public release. There is no earlier published version, so this section is the whole

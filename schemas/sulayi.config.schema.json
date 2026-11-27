@@ -885,6 +885,40 @@
               "description": "Links followed from the root. Default 3."
             }
           }
+        },
+        "browser": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sulayi's headless browser, off unless enabled. It loads the target's pages in a locally installed Chrome or Chromium and records what the front end requests. Every request a page makes is sent or refused by Sulayi's own client; the browser has no network of its own, never clicks, types or submits, and a state-changing request a page makes is recorded, never sent.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Defaults to false."
+            },
+            "executable": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The Chrome or Chromium to run. Defaults to the first standard installation found. Sulayi never downloads a browser."
+            },
+            "maxPages": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "Pages per identity. Default 20."
+            },
+            "maxDepth": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Links followed from the root. Default 3."
+            },
+            "maxRequests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "description": "Requests the browser's pages may make in all, divided among the identities. Default 300. They also count against assessment.maxRequests."
+            }
+          }
         }
       },
       "not": {

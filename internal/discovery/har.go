@@ -4,13 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"path"
 	"regexp"
 	"strings"
 
 	"github.com/jaylordibe/sulayi/internal/model"
-	"github.com/jaylordibe/sulayi/internal/scope"
 )
 
 // MaxHARBytes bounds a HAR file. Browser recordings are large; one bigger than
@@ -66,8 +63,9 @@ var tokenSegment = regexp.MustCompile(`^(?:eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A
 // is never permission to send any of them: nothing is replayed, and each
 // operation it yields is planned and gated exactly like one from a
 // specification. Only same-origin entries under the target's base path are
-// kept, and each becomes a method and a path — query strings are dropped, and
-// an entry whose path carries a token-like segment is left out entirely.
+// kept, and each becomes a method, a path and the names of its query
+// parameters — values are dropped, and an entry whose path carries a
+// token-like segment is left out entirely.
 func ParseHAR(data []byte, baseURL string) (HARResult, error) {
 	var out HARResult
 	if len(data) > MaxHARBytes {
@@ -77,69 +75,41 @@ func ParseHAR(data []byte, baseURL string) (HARResult, error) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return out, errors.New("the HAR file is not a JSON HAR document")
 	}
-	target, err := scope.ParseOrigin(baseURL)
+	obs, err := newObserver(baseURL)
 	if err != nil {
 		return out, fmt.Errorf("the target's origin cannot be established: %v", err)
 	}
-	base, err := url.Parse(baseURL)
-	if err != nil {
-		return out, err
-	}
-	basePath := strings.TrimRight(base.Path, "/")
 
-	seen := map[string]bool{}
+	index := map[string]int{}
 	for _, e := range doc.Log.Entries {
 		out.Entries++
-		method := strings.ToUpper(strings.TrimSpace(e.Request.Method))
-		u, err := url.Parse(e.Request.URL)
-		if err != nil || !harMethods[method] {
-			out.Skipped++
-			continue
-		}
-		origin, err := scope.OriginOf(u)
-		if err != nil || origin != target {
+		ob, v := obs.observe(e.Request.Method, e.Request.URL)
+		switch v {
+		case observedOffOrigin:
 			out.OffOrigin++
 			continue
-		}
-		p := u.Path
-		if p == "" {
-			p = "/"
-		}
-		if basePath != "" {
-			if p != basePath && !strings.HasPrefix(p, basePath+"/") {
-				out.OffOrigin++
-				continue
-			}
-			p = strings.TrimPrefix(p, basePath)
-			if p == "" {
-				p = "/"
-			}
-		}
-		if assetExtensions[strings.ToLower(path.Ext(p))] {
+		case observedAsset:
 			out.Assets++
 			continue
-		}
-		if hasDotSegment(p) {
+		case observedSensitive:
+			out.Sensitive++
+			continue
+		case observedSkipped:
 			out.Skipped++
 			continue
 		}
-		if sensitivePath(p) {
-			out.Sensitive++
-			continue
-		}
-		id := model.OperationID(method, p)
-		if seen[id] {
+		id := model.OperationID(ob.method, ob.path)
+		if i, ok := index[id]; ok {
+			addQueryParams(&out.Operations[i], ob.query)
 			continue
 		}
 		if len(out.Operations) >= MaxHAROperations {
 			out.Truncated = true
 			continue
 		}
-		seen[id] = true
-		out.Operations = append(out.Operations, model.Operation{
-			ID: id, Method: method, PathTemplate: p, BaseURL: baseURL,
-			Sources: []model.Source{{Kind: model.SourceHAR, Ref: "har " + method}},
-		})
+		index[id] = len(out.Operations)
+		out.Operations = append(out.Operations, obs.operation(ob,
+			model.Source{Kind: model.SourceHAR, Ref: "har " + ob.method}))
 	}
 	model.SortOperations(out.Operations)
 	return out, nil
@@ -181,6 +151,9 @@ func MergeOperations(existing, found []model.Operation) ([]model.Operation, int,
 			if model.PathMatchesTemplate(out[i].AbsolutePath(), f.AbsolutePath()) ||
 				model.PathMatchesTemplate(out[i].PathTemplate, f.PathTemplate) {
 				out[i].Sources = append(out[i].Sources, f.Sources...)
+				// A parameter a front end was seen sending exists, whichever
+				// source first described the route.
+				addQueryParams(&out[i], queryParamNames(f))
 				matched = true
 				corroborated++
 				break

@@ -913,6 +913,9 @@ func surfaceCompletenessStatement(res engine.Result) string {
 		if sf.CrawlAdded > 0 {
 			parts = append(parts, fmt.Sprintf("%d from crawling", sf.CrawlAdded))
 		}
+		if sf.BrowserAdded > 0 {
+			parts = append(parts, fmt.Sprintf("%d from Sulayi's browser", sf.BrowserAdded))
+		}
 		incomplete := ""
 		for _, c := range sf.Crawls {
 			if c.Incomplete {
@@ -920,10 +923,16 @@ func surfaceCompletenessStatement(res engine.Result) string {
 				break
 			}
 		}
+		for _, r := range sf.Browsing {
+			if r.Incomplete && incomplete == "" {
+				incomplete = " Browsing stopped at a limit, so even that is a floor."
+				break
+			}
+		}
 		return fmt.Sprintf("No specification was available. The %d operation(s) in this ledger were "+
 			"assembled from what could be observed — %s — so coverage is relative to what those "+
-			"sources revealed, not to the application: a route no adapter, recording or link "+
-			"reveals was not found and was not tested.%s", len(sf.Operations), strings.Join(parts, ", "),
+			"sources revealed, not to the application: a route no adapter, recording, link or "+
+			"page load reveals was not found and was not tested.%s", len(sf.Operations), strings.Join(parts, ", "),
 			incomplete)
 	}
 
@@ -1093,6 +1102,9 @@ func Summary(doc Document) string {
 		if len(doc.Surface.Sources.Crawls) > 0 {
 			from = append(from, "crawling")
 		}
+		if br := doc.Surface.Sources.Browser; br != nil && len(br.Actors) > 0 {
+			from = append(from, "Sulayi's browser")
+		}
 		if len(doc.Surface.Discovery.AdapterOperations) > 0 {
 			from = append(from, "framework adapters")
 		}
@@ -1117,6 +1129,22 @@ func Summary(doc Document) string {
 			line += " — INCOMPLETE: a limit was reached"
 		}
 		b.WriteString(line + "\n")
+	}
+	if br := doc.Surface.Sources.Browser; br != nil {
+		if br.Problem != "" {
+			b.WriteString("  browser:  did not run: " + br.Problem + "\n")
+		}
+		for _, a := range br.Actors {
+			line := fmt.Sprintf("  browser:  as %s, %d page(s), %d request(s), %d route(s)", a.Actor, a.Pages,
+				a.Requests, a.Operations)
+			if a.Fallback {
+				line += "; unknown paths load like real pages, so those loads were not counted"
+			}
+			if a.Incomplete {
+				line += " — INCOMPLETE: a limit was reached"
+			}
+			b.WriteString(line + "\n")
+		}
 	}
 	if a := doc.Surface.Sources.Access; a.Declared+a.Corroborated+len(a.Conflicts) > 0 {
 		b.WriteString(fmt.Sprintf("  access:   policy declared %d route(s), agreed with %d, conflicted with %d\n",
@@ -1401,6 +1429,8 @@ func intervals(ws []identity.Window) []Interval {
 type SurfaceSources struct {
 	HAR    *HARAccount    `json:"har,omitempty"`
 	Crawls []CrawlAccount `json:"crawls,omitempty"`
+	// Browser is what Sulayi's headless browser did, when it was enabled.
+	Browser *BrowserAccount `json:"browser,omitempty"`
 	// NavigationInferred counts routes reached by link only while signed in
 	// and given an inferred expectation; findings against them stay suspected.
 	NavigationInferred int           `json:"navigationInferred"`
@@ -1434,6 +1464,29 @@ type CrawlAccount struct {
 	Limitations []string `json:"limitations,omitempty"`
 }
 
+// BrowserAccount is what Sulayi's browser did, as every actor.
+type BrowserAccount struct {
+	// Problem explains a browser that was enabled and could not run.
+	Problem string          `json:"problem,omitempty"`
+	Actors  []BrowseAccount `json:"actors,omitempty"`
+}
+
+// BrowseAccount is one actor's browsing.
+type BrowseAccount struct {
+	Actor       string   `json:"actor"`
+	Pages       int      `json:"pages"`
+	Loaded      int      `json:"loaded"`
+	Failed      int      `json:"failed"`
+	Requests    int      `json:"requests"`
+	Operations  int      `json:"operations"`
+	OffOrigin   int      `json:"offOrigin"`
+	Skipped     int      `json:"skipped"`
+	Forms       int      `json:"forms"`
+	Fallback    bool     `json:"fallbackDetected"`
+	Incomplete  bool     `json:"incomplete"`
+	Limitations []string `json:"limitations,omitempty"`
+}
+
 // AccessAccount is what the declared access policy did.
 type AccessAccount struct {
 	Declared     int      `json:"declared"`
@@ -1456,6 +1509,17 @@ func surfaceSources(sf engine.Surface) SurfaceSources {
 			Skipped: c.Skipped, Forms: c.Forms, Fallback: c.Fallback, Incomplete: c.Incomplete,
 			Limitations: c.Limitations,
 		})
+	}
+	if sf.BrowserProblem != "" || len(sf.Browsing) > 0 {
+		out.Browser = &BrowserAccount{Problem: sf.BrowserProblem}
+		for _, r := range sf.Browsing {
+			out.Browser.Actors = append(out.Browser.Actors, BrowseAccount{
+				Actor: r.Actor, Pages: r.Pages, Loaded: r.Loaded, Failed: r.Failed, Requests: r.Requests,
+				Operations: len(r.Operations),
+				OffOrigin:  r.OffOrigin, Skipped: r.Skipped, Forms: r.Forms, Fallback: r.Fallback,
+				Incomplete: r.Incomplete, Limitations: r.Limitations,
+			})
+		}
 	}
 	out.Access = AccessAccount{Declared: sf.Access.Declared, Corroborated: sf.Access.Corroborated}
 	for _, c := range sf.Access.Conflicts {

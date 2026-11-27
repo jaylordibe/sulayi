@@ -57,7 +57,9 @@ sulayi attack http://localhost:3000
 
 Sulayi looks for an OpenAPI document at common paths such as `/openapi.json`,
 `/api/docs-json` and `/v3/api-docs`, and crawls your app's own pages either way. Point it
-at a specification if it lives elsewhere, or at a browser recording of a single-page app:
+at a specification if it lives elsewhere, or at a browser recording of a single-page app —
+or turn on its headless browser (`discovery.browser.enabled: true`), which uses the Chrome
+or Chromium you have installed:
 
 ```bash
 sulayi attack http://localhost:3000 --spec ./openapi.json
@@ -101,7 +103,7 @@ compare against. [Add identities](#identities) and the same defect can be confir
  target URL ──► discover ──► plan ──► attack ──► verify ──► report
                    │           │         │          │          │
             OpenAPI, adapters, │   every request    │    JSON, SARIF,
-            HAR, bounded crawl │   through one      │    coverage ledger,
+       HAR, crawl, browser │   through one      │    coverage ledger,
                                │   safety-enforcing │    request log
                                │   HTTP client      │
                  profile gate, scope,      authenticated control
@@ -110,7 +112,8 @@ compare against. [Add identities](#identities) and the same defect can be confir
 
 1. **Discover.** The attack surface comes from whatever is available: an OpenAPI document,
    framework adapters (Laravel, NestJS) that read your source without executing it, a
-   browser recording, and a bounded crawl of your app as each test account. None of them is
+   browser recording, a bounded crawl of your app as each test account, and — when you turn
+   it on — a headless browser that records what your front end requests. None of them is
    required, and no source may guess an HTTP method.
 2. **Plan.** Every operation is matched to the checks that apply to it. Anything that is
    not tested gets a ledger row saying why — no oracle, missing resource, safety policy,
@@ -140,7 +143,8 @@ compare against. [Add identities](#identities) and the same defect can be confir
 | Nuclei and ZAP integrations | Built, **currently blocked** (see [Safety](#safety)) |
 | Signing in through the app's own login: bearer token or cookie session (with CSRF), `--env` credentials files, roles, bounded re-authentication | Implemented — bearer logins are run against the Laravel Passport and NestJS JWT reference starters by the reference workflow; cookie sessions and CSRF are tested on local fixtures only |
 | Testing across accounts and roles from records Sulayi creates and deletes itself, against declared ownership and role rules | Implemented — validated on both reference starters, and confirmed every planted cross-owner and cross-role defect it reached on crAPI and Juice Shop |
-| Testing applications without an OpenAPI document: framework adapters, browser recordings (HAR, discovery only) and a bounded same-origin crawler, with a declared access policy as the oracle | Implemented — the crawler reads server-rendered links only; a single-page app's API comes from a HAR |
+| Testing applications without an OpenAPI document: framework adapters, browser recordings (HAR, discovery only) and a bounded same-origin crawler, with a declared access policy as the oracle | Implemented — the crawler reads server-rendered links only |
+| A headless browser for single-page applications, with no network of its own: every request a page makes goes through Sulayi's client, and none that changes state is sent | Implemented, off by default — negative tests against a real Chrome; not yet measured on Juice Shop |
 | Injection and misconfiguration checks: boolean SQL injection, reflected XSS, template injection, open redirect, credentialed CORS, stack-trace disclosure — GET query and path parameters only | Implemented — validated on paired local fixtures |
 | `sulayi report` and `sulayi verify <finding>`: re-running one finding from its recipe, with fresh sign-ins, as a new linked run | Implemented — validated on local fixtures; reproduced crAPI findings from their recipes |
 
@@ -250,6 +254,22 @@ Sulayi crawls your app — GET only, on its own origin, to a fixed depth — as 
 visitor and as each test account, and can read a browser recording (`--har`) or a
 framework adapter's routing table. It never submits a form, never runs your JavaScript, and
 never requests a sign-out route.
+
+For a single-page application, turn on the headless browser:
+
+```yaml
+discovery:
+  browser:
+    enabled: true          # uses your installed Chrome or Chromium; Sulayi never downloads one
+```
+
+It loads your pages as each account and follows the links that render, client-side routes
+included, and records the requests your front end makes — with the names of their query
+parameters, never the values. It has no network of its own: every request a page makes is
+sent, or refused, by Sulayi's client under the same scope, budget and request log, and a
+request that would change state is recorded and never sent, in every profile. It never
+clicks, types or submits. An app that keeps its sign-in token in browser storage shows its
+signed-out screens, though every request still carries the account's credential.
 
 To make findings confirmable, say which routes should require authentication:
 
@@ -441,8 +461,8 @@ Sulayi is pre-1.0; the first release is [v0.1.0](docs/releases/v0.1.0.md). Outpu
 
 Known limits today: injection is tested in GET query and path parameters only, never in
 request bodies; cross-role comparison uses GET only; there is no tenancy testing, SSRF,
-mass-assignment or client-side (DOM) testing; a single-page app's API is found only from a
-browser recording; OAuth authorization flows, OIDC, MFA and browser login are not
+mass-assignment or client-side (DOM) testing; the headless browser never clicks or types,
+so it finds only what a single-page app requests as its pages load; OAuth authorization flows, OIDC, MFA and browser login are not
 supported; and an application whose `GET` endpoints change state is protected only as far
 as you list them.
 

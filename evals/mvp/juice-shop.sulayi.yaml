@@ -1,7 +1,8 @@
 # MVP measurement configuration for OWASP Juice Shop v20.4.0 (ADR-0025): what
 # an operator would write for it. Juice Shop is a single-page application with
 # no specification of its API, so its surface is the browser recording beside
-# this file (juice-shop.har, reduced to methods and URLs):
+# this file (juice-shop.har, reduced to methods, paths and query parameter
+# names) and, from entry 3 on, Sulayi's headless browser (ADR-0026):
 #
 #   sulayi attack -c evals/mvp/juice-shop.sulayi.yaml --har evals/mvp/juice-shop.har \
 #     --env <credentials file>
@@ -49,6 +50,9 @@ identities:
         session:
           bearer: /authentication/token
     liveness: { method: GET, path: /api/Cards }
+discovery:
+  browser:
+    enabled: true
 access:
   roles:
     - paths: ["/api/Users", "/rest/user/authentication-details"]

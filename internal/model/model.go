@@ -66,8 +66,11 @@ const (
 	SourceWellKnown  SourceKind = "well-known"
 
 	// Surface sources that need no specification.
-	SourceHAR          SourceKind = "har"
-	SourceCrawl        SourceKind = "crawl"
+	SourceHAR   SourceKind = "har"
+	SourceCrawl SourceKind = "crawl"
+	// SourceBrowser is a request Sulayi's own browser saw a page make, or a
+	// form in a page it rendered.
+	SourceBrowser      SourceKind = "browser"
 	SourceAccessPolicy SourceKind = "access-policy"
 )
 

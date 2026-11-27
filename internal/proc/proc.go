@@ -96,6 +96,11 @@ func (r Result) Failed() bool {
 	return r.TimedOut || r.Cancelled || r.StdoutTruncated
 }
 
+// Isolate gives a long-lived child its own process group, so that killing it
+// kills what it spawned. Run does this for every invocation; Isolate is for a
+// caller that supervises a process itself, as the browser does.
+func Isolate(cmd *exec.Cmd) { setProcessGroup(cmd) }
+
 // Run executes a program under full supervision.
 //
 // Every step here closes a specific way an untrusted child can hurt the parent:

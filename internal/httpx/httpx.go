@@ -405,6 +405,18 @@ type Request struct {
 	// safety guard's authentication exception is reachable only through that
 	// one method.
 	authentication bool
+	// relay marks a request made through Relay: read-only in every profile,
+	// with the larger body limit a browser needs, and no evidence captured.
+	relay bool
+}
+
+// rawResponse is a response as received, kept in memory for the one caller
+// that asked for it and never stored.
+type rawResponse struct {
+	Status    int
+	Header    http.Header
+	Body      []byte
+	Truncated bool
 }
 
 // AuthResponse is what an authentication request returned, unredacted and in
@@ -431,18 +443,78 @@ type AuthResponse struct {
 // raw, in memory, instead of as a redacted exchange.
 func (c *Client) Authenticate(ctx context.Context, r Request) (AuthResponse, error) {
 	r.authentication = true
-	var raw AuthResponse
+	r.relay = false
 	if c.opts.Audit != nil && c.auditBroken.Load() {
-		return raw, &ErrNotSent{Err: errors.New("the request log could not be written, so no further " +
+		return AuthResponse{}, &ErrNotSent{Err: errors.New("the request log could not be written, so no further " +
 			"request is sent")}
 	}
+	var raw rawResponse
 	at := c.now()
 	ex, err := c.do(ctx, r, &raw)
 	c.audit(ctx, r, at, ex, err)
 	if err != nil {
 		return AuthResponse{}, c.redactError(err)
 	}
-	return raw, nil
+	return AuthResponse{Status: raw.Status, Body: raw.Body, SetCookies: raw.Header.Values("Set-Cookie"),
+		Truncated: raw.Truncated}, nil
+}
+
+// MaxRelayBodyBytes bounds one response relayed to the browser. A browser
+// loads whole script bundles, which the evidence limit would cut, and a cut
+// bundle is a broken page; past this a response is refused, not truncated.
+const MaxRelayBodyBytes = 16 << 20
+
+// ErrRelayTooLarge reports a response that was sent and answered, and was over
+// MaxRelayBodyBytes, so it was not delivered to the page. Unlike a refusal, it
+// reached the target.
+type ErrRelayTooLarge struct{ Limit int64 }
+
+func (e *ErrRelayTooLarge) Error() string {
+	return fmt.Sprintf("the response exceeded the %d-byte limit for the browser", e.Limit)
+}
+
+// RelayResponse is a response relayed to the browser: unredacted, in memory,
+// and never stored as evidence.
+type RelayResponse struct {
+	Status int
+	Header http.Header
+	Body   []byte
+}
+
+// Relay sends a request a browser page made, on the page's behalf.
+//
+// It passes every gate Do does — origin binding, the safety guard, scope, the
+// budget, pacing, redirect refusal and the request log — and adds one: it
+// refuses every state-changing request in every profile, aggressive included.
+// The browser is discovery, and discovery never changes the target; what the
+// page tried to send is still known to the caller, which records it as an
+// observed operation. The response is returned raw so the page can render it,
+// and none of it becomes evidence.
+func (c *Client) Relay(ctx context.Context, r Request) (RelayResponse, error) {
+	r.authentication = false
+	r.relay = true
+	r.Body = nil
+	if c.opts.Audit != nil && c.auditBroken.Load() {
+		return RelayResponse{}, &ErrNotSent{Err: errors.New("the request log could not be written, so no " +
+			"further request is sent")}
+	}
+	var raw rawResponse
+	at := c.now()
+	ex, err := c.do(ctx, r, &raw)
+	if err == nil && raw.Truncated {
+		err = &ErrRelayTooLarge{Limit: MaxRelayBodyBytes}
+		ex.Err = err.Error()
+		ex.Response = nil
+		// It was sent: the log says so, with the reason it was not delivered.
+		c.audit(ctx, r, at, model.Exchange{Request: ex.Request, Response: &model.CapturedResponse{
+			Status: raw.Status}, Err: ex.Err}, nil)
+		return RelayResponse{}, c.redactError(err)
+	}
+	c.audit(ctx, r, at, ex, err)
+	if err != nil {
+		return RelayResponse{}, c.redactError(err)
+	}
+	return RelayResponse{Status: raw.Status, Header: raw.Header, Body: raw.Body}, nil
 }
 
 // Do performs a request and returns a redacted exchange.
@@ -545,7 +617,7 @@ var errClosed = errors.New("httpx: the client is closed")
 
 // do performs one request without recording it.
 // When raw is non-nil the unredacted response is written to it as well.
-func (c *Client) do(ctx context.Context, r Request, raw *AuthResponse) (model.Exchange, error) {
+func (c *Client) do(ctx context.Context, r Request, raw *rawResponse) (model.Exchange, error) {
 	if c.closed.Load() {
 		err := &ErrNotSent{Err: errClosed}
 		return model.Exchange{
@@ -574,6 +646,13 @@ func (c *Client) do(ctx context.Context, r Request, raw *AuthResponse) (model.Ex
 					"is to a different origin"}
 			return model.Exchange{Request: captured, Err: c.red.Error(err)}, err
 		}
+	}
+
+	// A browser page only ever reads through Sulayi, whatever the profile.
+	if r.relay && c.opts.Guard.StateChanging(captured.Method, r.URL) {
+		err := &ErrRefused{Method: captured.Method, Target: c.red.URL(r.URL),
+			Reason: "the browser only reads: a state-changing request a page makes is recorded, never sent"}
+		return model.Exchange{Request: captured, Err: c.red.Error(err)}, err
 	}
 
 	// The safety guard runs first: a refused request sends nothing, waits for
@@ -630,7 +709,11 @@ func (c *Client) do(ctx context.Context, r Request, raw *AuthResponse) (model.Ex
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, truncated, readErr := readBounded(resp.Body, c.opts.MaxBodyBytes)
+	limit := c.opts.MaxBodyBytes
+	if r.relay {
+		limit = MaxRelayBodyBytes
+	}
+	body, truncated, readErr := readBounded(resp.Body, limit)
 	if readErr != nil && !errors.Is(readErr, ErrBodyTooLarge) {
 		ex := model.Exchange{Request: captured, Err: c.red.Error(readErr)}
 		return ex, readErr
@@ -638,9 +721,15 @@ func (c *Client) do(ctx context.Context, r Request, raw *AuthResponse) (model.Ex
 
 	if raw != nil {
 		raw.Status = resp.StatusCode
+		raw.Header = resp.Header.Clone()
 		raw.Body = append([]byte(nil), body...)
-		raw.SetCookies = append([]string(nil), resp.Header.Values("Set-Cookie")...)
 		raw.Truncated = truncated
+	}
+	if r.relay {
+		// Nothing a page loads becomes evidence, so none of it is redacted
+		// and kept; the log records the status alone.
+		return model.Exchange{Request: captured, Response: &model.CapturedResponse{
+			Status: resp.StatusCode, Elapsed: c.now().Sub(start)}}, nil
 	}
 
 	captureResp := &model.CapturedResponse{

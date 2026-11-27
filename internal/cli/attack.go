@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jaylordibe/sulayi/internal/adapter"
+	"github.com/jaylordibe/sulayi/internal/browser"
 	"github.com/jaylordibe/sulayi/internal/check"
 	"github.com/jaylordibe/sulayi/internal/config"
 	"github.com/jaylordibe/sulayi/internal/discovery"
@@ -302,10 +303,19 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 	// A verification run's surface is the one operation its recipe names;
 	// nothing is discovered (ADR-0024).
 	var surface engine.Surface
+	var browserExe string
 	if f != nil {
 		surface = focusSurface(cfg, f.recipe)
 	} else {
-		specOptional := len(cfg.AdapterSpecs()) > 0 || har != nil || cfg.CrawlEnabled()
+		if cfg.Discovery.Browser.Enabled {
+			// Found before any request is sent: an operator who enabled the
+			// browser and has none learns that now, not in a report.
+			if browserExe, err = browser.Find(cfg.Discovery.Browser.Executable); err != nil {
+				return fail(ExitUsage, "%v", err)
+			}
+		}
+		specOptional := len(cfg.AdapterSpecs()) > 0 || har != nil || cfg.CrawlEnabled() ||
+			cfg.Discovery.Browser.Enabled
 		surface, err = discover(ctx, cfg, client, now, specOptional)
 		if err != nil {
 			return fail(ExitAborted, "discovery failed: %v", err)
@@ -514,6 +524,13 @@ func runScan(ctx context.Context, cfg config.Config, creds *identity.EnvFile, ha
 		if answered == 0 && len(surface.Operations) == 0 && !surface.SpecDerived {
 			return fail(ExitAborted, "the target did not respond to any request, so nothing could be assessed")
 		}
+	}
+
+	// The browser runs after the crawler, as the same actors: what a
+	// single-page application's front end requests as its pages load is the
+	// surface the crawler cannot see (ADR-0026).
+	if browserExe != "" {
+		runBrowser(ctx, cfg, browserExe, client, guard, identities, &surface, stderr)
 	}
 
 	// A GET route reached by link only while signed in, with no other
