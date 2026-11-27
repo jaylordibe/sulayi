@@ -78,10 +78,14 @@ func TestBrowserFindsASinglePageApplicationsAPIAndNeverWrites(t *testing.T) {
 	defer srv.Close()
 	dir := t.TempDir()
 	t.Chdir(dir)
-	tmp := filepath.Join(dir, "tmp")
-	if err := os.Mkdir(tmp, 0o700); err != nil {
+	// A dedicated, short temporary directory, so the check below sees only
+	// this run's browser profile. Short, because Chrome on Linux puts a Unix
+	// socket under it, and a socket path may not exceed about 100 bytes.
+	tmp, err := os.MkdirTemp("", "sb")
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
 	if runtime.GOOS != "windows" {
 		t.Setenv("TMPDIR", tmp)
 	}

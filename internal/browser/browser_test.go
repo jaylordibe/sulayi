@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -285,5 +287,23 @@ func TestCancellingAVisitStopsIt(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("closing a page with a hung relay did not return")
+	}
+}
+
+// A browser that will not start says why: the end of what it printed is in
+// the error, which is what an operator — or CI — has to go on.
+func TestABrowserThatWillNotStartSaysWhy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as the browser")
+	}
+	fake := filepath.Join(t.TempDir(), "chrome")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'noise'\necho 'FATAL: no usable sandbox' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := Launch(ctx, fake)
+	if err == nil || !strings.Contains(err.Error(), "FATAL: no usable sandbox") {
+		t.Fatalf("err = %v, want the browser's own diagnostics", err)
 	}
 }

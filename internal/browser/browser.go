@@ -185,6 +185,10 @@ func Launch(ctx context.Context, exe string) (*Browser, error) {
 	cmd.Env = append(proc.MinimalEnv([]string{"SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR",
 		"LOCALAPPDATA", "PROGRAMDATA"}, nil), "HOME="+profile, "USERPROFILE="+profile)
 	proc.Isolate(cmd)
+	// The browser's diagnostics are kept, bounded, for the one case they are
+	// needed: a browser that will not start says why.
+	diag := &tail{max: 8 << 10}
+	cmd.Stderr = diag
 	p, err := attachPipes(cmd)
 	if err != nil {
 		kill()
@@ -219,9 +223,40 @@ func Launch(ctx context.Context, exe string) (*Browser, error) {
 	}
 	if err := b.conn.call(startCtx, "", "Browser.getVersion", struct{}{}, &version); err != nil {
 		_ = b.Close()
-		return nil, fmt.Errorf("the browser did not answer: %w", err)
+		return nil, fmt.Errorf("the browser did not answer: %w%s", err, diag.said())
 	}
 	return b, nil
+}
+
+// tail keeps the last max bytes written to it.
+type tail struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (t *tail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - t.max; over > 0 {
+		t.buf = t.buf[over:]
+	}
+	return len(p), nil
+}
+
+// said renders what the browser printed, for an error message.
+func (t *tail) said() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.buf) == 0 {
+		return " (the browser printed nothing)"
+	}
+	said := string(t.buf)
+	if len(said) > 2048 {
+		said = said[len(said)-2048:] // the end of a crash log is the part that says why
+	}
+	return "; the browser said: " + proc.Sanitize(said, 4096)
 }
 
 // refuse accepts and immediately closes every connection made to the proxy.
